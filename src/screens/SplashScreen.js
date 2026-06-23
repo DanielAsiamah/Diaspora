@@ -8,6 +8,7 @@ const PHASES = [
   {
     key: 'welcome',
     line: 'Welcome to Diaspora...',
+    subline: 'Learn the languages of the people',
     accent: colors.textOnDark,
     gradient: [colors.splash, '#101E33', colors.splash],
     duration: 2600,
@@ -15,6 +16,7 @@ const PHASES = [
   {
     key: 'africa',
     line: 'Africa',
+    subline: 'Swahili · Igbo · Wolof · Nubian',
     accent: colors.africaGold,
     gradient: [colors.splashWarm, '#2A1808', colors.splashWarm],
     duration: 2200,
@@ -22,8 +24,33 @@ const PHASES = [
   {
     key: 'caribbean',
     line: 'Caribbean',
+    subline: 'Jamaican Patois · Haitian Creole',
     accent: colors.caribbeanBright,
     gradient: [colors.splashGreen, '#0D2618', colors.splashGreen],
+    duration: 2200,
+  },
+  {
+    key: 'central-america',
+    line: 'Central America',
+    subline: 'Belizean Creole · Kriol roots',
+    accent: colors.coral,
+    gradient: ['#1A0A05', '#2B1510', '#1A0A05'],
+    duration: 2200,
+  },
+  {
+    key: 'america',
+    line: 'America',
+    subline: 'Black American English · AAVE',
+    accent: colors.purple,
+    gradient: ['#120820', '#1E1030', '#120820'],
+    duration: 2200,
+  },
+  {
+    key: 'arabia',
+    line: 'Arabia',
+    subline: 'Sudanese Arabic · Nubian tongue',
+    accent: colors.africaGold,
+    gradient: ['#1A1208', '#261D0C', '#1A1208'],
     duration: 2200,
   },
 ];
@@ -32,6 +59,7 @@ export default function SplashScreen({ onFinish }) {
   const [phaseIndex, setPhaseIndex] = useState(0);
   const textOpacity = useRef(new Animated.Value(0)).current;
   const textScale = useRef(new Animated.Value(0.96)).current;
+  const sublineOpacity = useRef(new Animated.Value(0)).current;
   const bgProgress = useRef(new Animated.Value(0)).current;
   const exitOpacity = useRef(new Animated.Value(1)).current;
 
@@ -47,6 +75,7 @@ export default function SplashScreen({ onFinish }) {
         setPhaseIndex(index);
         textOpacity.setValue(0);
         textScale.setValue(0.96);
+        sublineOpacity.setValue(0);
 
         Animated.timing(bgProgress, {
           toValue: index / (PHASES.length - 1),
@@ -59,6 +88,15 @@ export default function SplashScreen({ onFinish }) {
         if (cancelled) {
           return;
         }
+
+        // Animate subline in slightly after title
+        Animated.timing(sublineOpacity, {
+          toValue: 1,
+          duration: 500,
+          delay: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
 
         await wait(PHASES[index].duration);
         if (cancelled) {
@@ -87,7 +125,7 @@ export default function SplashScreen({ onFinish }) {
     return () => {
       cancelled = true;
     };
-  }, [bgProgress, exitOpacity, onFinish, textOpacity, textScale]);
+  }, [bgProgress, exitOpacity, onFinish, textOpacity, textScale, sublineOpacity]);
 
   function animateIn() {
     return new Promise((resolve) => {
@@ -110,19 +148,32 @@ export default function SplashScreen({ onFinish }) {
 
   function animateOut() {
     return new Promise((resolve) => {
-      Animated.timing(textOpacity, {
-        toValue: 0,
-        duration: 700,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }).start(() => resolve());
+      Animated.parallel([
+        Animated.timing(textOpacity, {
+          toValue: 0,
+          duration: 700,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(sublineOpacity, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(() => resolve());
     });
   }
 
   const phase = PHASES[phaseIndex];
+
+  // Interpolate across all phases
+  const phaseCount = PHASES.length - 1;
+  const inputRange = Array.from({ length: PHASES.length }, (_, i) => i / phaseCount);
+  const bgColors = PHASES.map((p) => p.gradient[1]);
   const backgroundColor = bgProgress.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [colors.splash, colors.splashWarm, colors.splashGreen],
+    inputRange,
+    outputRange: bgColors,
   });
 
   return (
@@ -144,11 +195,9 @@ export default function SplashScreen({ onFinish }) {
           {phase.line}
         </Animated.Text>
 
-        {phase.key === 'caribbean' ? (
-          <Animated.Text style={[styles.subline, { opacity: textOpacity }]}>
-            Languages of the diaspora
-          </Animated.Text>
-        ) : null}
+        <Animated.Text style={[styles.subline, { opacity: sublineOpacity }]}>
+          {phase.subline}
+        </Animated.Text>
       </View>
     </Animated.View>
   );
@@ -178,7 +227,7 @@ const styles = StyleSheet.create({
   },
   phaseText: {
     fontFamily: fonts.extraBold,
-    fontSize: 52,
+    fontSize: 48,
     letterSpacing: 1,
     textAlign: 'center',
   },
