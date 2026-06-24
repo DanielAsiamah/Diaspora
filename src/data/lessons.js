@@ -1,85 +1,12 @@
+import { patoisUnits } from './patoisCurriculum';
+
 export const coursesData = {
   patois: {
     title: 'Jamaican Patois',
     flag: '🇯🇲',
-    themeColor: '#009B3A', // Jamaican green
-    accentColor: '#F4B942', // Gold
-    units: [
-      {
-        id: 'patois-u1',
-        title: 'SECTION 1, UNIT 1',
-        description: 'Greet and say goodbye',
-        lessons: [
-          {
-            id: 'pat-l1',
-            title: 'Casual Hello',
-            subtitle: 'Start a friendly chat',
-            xp: 20,
-            phrase: 'Wah gwaan?',
-            meaning: 'What is going on?',
-            note: 'A classic casual greeting. Reply with "Mi deh yah" (I\'m okay).',
-            type: 'star',
-            quiz: {
-              prompt: 'What does "Wah gwaan?" mean?',
-              answer: 'What is going on?',
-              choices: ['Good morning', 'What is going on?', 'Goodbye'],
-            },
-          },
-          {
-            id: 'pat-l2',
-            title: 'Respect',
-            subtitle: 'Polite everyday terms',
-            xp: 25,
-            phrase: 'Respect',
-            meaning: 'Thank you / Greetings',
-            note: 'Used as a sign of appreciation, mutual acknowledgement or greeting.',
-            type: 'star',
-            quiz: {
-              prompt: 'How is "Respect" commonly used?',
-              answer: 'To show gratitude or greeting',
-              choices: ['To express anger', 'To show gratitude or greeting', 'Only to elderly people'],
-            },
-          },
-          {
-            id: 'pat-chest1',
-            title: 'Gold Chest',
-            type: 'chest',
-            xp: 50,
-            claimed: false,
-          },
-          {
-            id: 'pat-l3',
-            title: 'Speaking Practice',
-            subtitle: 'Conversational greetings',
-            xp: 30,
-            phrase: 'Bless up',
-            meaning: 'Have a blessed day',
-            note: 'A warm, positive parting phrase wishing good vibes.',
-            type: 'camera',
-            quiz: {
-              prompt: 'When would you say "Bless up"?',
-              answer: 'To wish someone well',
-              choices: ['When you are angry', 'To wish someone well', 'To ask for directions'],
-            },
-          },
-          {
-            id: 'pat-l4',
-            title: 'Unit Checkpoint',
-            subtitle: 'Review your greetings',
-            xp: 40,
-            phrase: 'Likkle more',
-            meaning: 'See you later',
-            note: 'Literal meaning is "little more time". Standard way of saying goodbye.',
-            type: 'trophy',
-            quiz: {
-              prompt: 'What is the meaning of "Likkle more"?',
-              answer: 'See you later',
-              choices: ['Give me a little more', 'See you later', 'Hurry up'],
-            },
-          },
-        ],
-      },
-    ],
+    themeColor: '#009B3A',
+    accentColor: '#F4B942',
+    units: patoisUnits,
   },
   swahili: {
     title: 'Swahili',

@@ -1,16 +1,16 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAudioPlayer } from 'expo-audio';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   Alert,
-  Animated,
   Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  Vibration,
   View,
 } from 'react-native';
 
@@ -18,81 +18,261 @@ import HeartsBar from '../components/HeartsBar';
 import MascotHero from '../components/MascotHero';
 import OutOfHeartsModal from '../components/OutOfHeartsModal';
 import PrimaryButton from '../components/PrimaryButton';
+import { useAuth } from '../context/AuthContext';
 import { useGame } from '../context/GameContext';
-import { coursesData } from '../data/lessons';
+import { getCourseById, getPublishedUnits } from '../data/curriculumRepository';
 import { colors, fonts, radius, spacing } from '../theme';
 
-// Helper to calculate winding path offset
 const getMarginLeft = (index) => {
   const cycle = index % 8;
   if (cycle === 0) return 0;
-  if (cycle === 1) return 45;
-  if (cycle === 2) return 75;
-  if (cycle === 3) return 45;
+  if (cycle === 1) return 44;
+  if (cycle === 2) return 76;
+  if (cycle === 3) return 44;
   if (cycle === 4) return 0;
-  if (cycle === 5) return -45;
-  if (cycle === 6) return -75;
-  if (cycle === 7) return -45;
-  return 0;
+  if (cycle === 5) return -44;
+  if (cycle === 6) return -76;
+  return -44;
 };
 
-// Node component inside winding path
-function PathNode({
-  node,
-  index,
-  isCompleted,
-  isActive,
-  isLocked,
-  themeColor,
-  accentColor,
-  onPress,
-}) {
-  const isChest = node.type === 'chest';
-  const isCamera = node.type === 'camera';
-  const isTrophy = node.type === 'trophy';
+const shuffle = (items) => [...items].sort(() => Math.random() - 0.5);
 
-  // Winding offset
+function normaliseAnswer(value) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function wordsFromAnswer(answer) {
+  return answer
+    .replace(/[?!.,/]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function createLessonExercises(lesson) {
+  if (!lesson) return [];
+
+  const quizAnswer = lesson.quiz?.answer || lesson.meaning;
+  const answerWords = wordsFromAnswer(lesson.meaning);
+  const extras = ['please', 'soon', 'friend', 'today', 'good', 'hello'].filter(
+    (word) => !answerWords.map((item) => item.toLowerCase()).includes(word)
+  );
+
+  return [
+    {
+      id: 'choice',
+      type: 'choice',
+      title: `What does "${lesson.phrase}" mean?`,
+      prompt: lesson.phrase,
+      phrase: lesson.phrase,
+      answer: quizAnswer,
+      choices: lesson.quiz?.choices || shuffle([quizAnswer, 'Goodbye', 'Thank you']),
+    },
+    {
+      id: 'build',
+      type: 'build',
+      title: `Build the meaning of "${lesson.phrase}"`,
+      prompt: lesson.phrase,
+      answer: lesson.meaning,
+      wordBank: shuffle([...answerWords, ...extras.slice(0, Math.max(2, 6 - answerWords.length))]),
+    },
+  ];
+}
+
+function PathNode({ node, index, isCompleted, isActive, isLocked, themeColor, accentColor, onPress }) {
+  const isChest = node.type === 'chest';
+  const isTrophy = node.type === 'trophy';
   const marginLeft = getMarginLeft(index);
 
   return (
     <View style={[styles.nodeRow, { transform: [{ translateX: marginLeft }] }]}>
-      {/* Connector Line */}
-      {index > 0 && <View style={styles.pathLine} />}
-
+      {index > 0 ? <View style={styles.pathLine} /> : null}
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
           styles.nodeCircle,
-          isCompleted && [styles.nodeCompleted, { backgroundColor: themeColor, borderColor: themeColor + 'CC' }],
+          isCompleted && [styles.nodeCompleted, { backgroundColor: themeColor, borderColor: themeColor }],
           isActive && [styles.nodeActive, { borderColor: accentColor }],
           isLocked && styles.nodeLocked,
-          isChest && styles.nodeChestStyle,
-          isTrophy && styles.nodeTrophyStyle,
-          pressed && { transform: [{ scale: 0.95 }] },
+          isChest && styles.nodeChest,
+          isTrophy && styles.nodeTrophy,
+          pressed && !isLocked && { transform: [{ scale: 0.95 }] },
         ]}
       >
         {isChest ? (
-          <Text style={styles.nodeEmoji}>{node.claimed ? '📂' : '🎁'}</Text>
+          <Text style={styles.nodeEmoji}>🎁</Text>
         ) : isTrophy ? (
           <Text style={styles.nodeEmoji}>🏆</Text>
-        ) : isCamera ? (
-          <Text style={styles.nodeEmoji}>🗣️</Text>
         ) : (
           <Text style={[styles.nodeText, isCompleted && styles.nodeTextCompleted]}>
             {isCompleted ? '✓' : index + 1}
           </Text>
         )}
       </Pressable>
-
-      {/* active glow indicator */}
-      {isActive && (
-        <View style={[styles.activeIndicatorRing, { borderColor: accentColor }]} />
-      )}
+      {isActive ? <View style={[styles.activeRing, { borderColor: accentColor }]} /> : null}
     </View>
   );
 }
 
+function LessonPlayer({ lesson, hearts, maxHearts, onExit, onMistake, onComplete }) {
+  const exercises = useMemo(() => createLessonExercises(lesson), [lesson]);
+  const correctSound = useAudioPlayer(require('../../assets/sounds/correct.mp3'));
+  const wrongSound = useAudioPlayer(require('../../assets/sounds/wrong.mp3'));
+  const [step, setStep] = useState(0);
+  const [selectedChoice, setSelectedChoice] = useState(null);
+  const [builtWords, setBuiltWords] = useState([]);
+  const [feedback, setFeedback] = useState(null);
+
+  const exercise = exercises[step];
+  const progress = (step + (feedback?.correct ? 1 : 0)) / exercises.length;
+
+  function selectedAnswer() {
+    if (exercise.type === 'choice') return selectedChoice;
+    return builtWords.join(' ');
+  }
+
+  function canCheck() {
+    return exercise.type === 'choice' ? Boolean(selectedChoice) : builtWords.length > 0;
+  }
+
+  function checkAnswer() {
+    const answer = selectedAnswer();
+    const correct = normaliseAnswer(answer) === normaliseAnswer(exercise.answer);
+    const feedbackSound = correct ? correctSound : wrongSound;
+    feedbackSound.seekTo(0).then(() => feedbackSound.play());
+    Vibration.vibrate(correct ? 35 : [0, 80, 70, 120]);
+    if (!correct) onMistake();
+    setFeedback({ correct, answer });
+  }
+
+  function continueLesson() {
+    if (step === exercises.length - 1) {
+      onComplete();
+      return;
+    }
+    setStep((current) => current + 1);
+    setSelectedChoice(null);
+    setBuiltWords([]);
+    setFeedback(null);
+  }
+
+  return (
+    <SafeAreaView style={styles.lessonSafeArea}>
+      <StatusBar style="light" />
+      <View style={styles.lessonTopBar}>
+        <Pressable
+          accessibilityLabel="Exit lesson"
+          accessibilityRole="button"
+          hitSlop={12}
+          onPress={onExit}
+          style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
+        >
+          <Text style={styles.closeButtonText}>×</Text>
+        </Pressable>
+        <View style={styles.lessonProgressTrack}>
+          <View style={[styles.lessonProgressFill, { width: `${Math.max(progress * 100, 12)}%` }]} />
+        </View>
+        <HeartsBar hearts={hearts} maxHearts={maxHearts} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.lessonContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.lessonTitle}>{exercise.title}</Text>
+        <View style={styles.lessonPromptRow}>
+          <MascotHero />
+          <View style={styles.speechCard}>
+            <Text style={styles.soundIcon}>🔊</Text>
+            <View style={styles.speechTextWrap}>
+              <Text style={styles.phraseText}>{exercise.prompt}</Text>
+              <Text style={styles.phraseHint}>{lesson.note}</Text>
+            </View>
+          </View>
+        </View>
+
+        {exercise.type === 'choice' ? (
+          <View style={styles.choiceList}>
+            {exercise.choices.map((choice) => {
+              const selected = selectedChoice === choice;
+              return (
+                <Pressable
+                  key={choice}
+                  disabled={Boolean(feedback)}
+                  onPress={() => setSelectedChoice(choice)}
+                  style={[styles.answerCard, selected && styles.answerCardSelected]}
+                >
+                  <Text style={styles.answerCardText}>{choice}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.buildArea}>
+            <View style={styles.answerTray}>
+              {builtWords.length === 0 ? (
+                <Text style={styles.answerPlaceholder}>Tap words to build your answer</Text>
+              ) : (
+                builtWords.map((word, index) => (
+                  <Pressable
+                    key={`${word}-${index}`}
+                    disabled={Boolean(feedback)}
+                    onPress={() => setBuiltWords((words) => words.filter((_, itemIndex) => itemIndex !== index))}
+                    style={styles.wordChipSelected}
+                  >
+                    <Text style={styles.wordChipText}>{word}</Text>
+                  </Pressable>
+                ))
+              )}
+            </View>
+            <View style={styles.wordBank}>
+              {exercise.wordBank.map((word, index) => {
+                const used = builtWords.includes(word);
+                return (
+                  <Pressable
+                    key={`${word}-${index}`}
+                    disabled={used || Boolean(feedback)}
+                    onPress={() => setBuiltWords((words) => [...words, word])}
+                    style={[styles.wordChip, used && styles.wordChipUsed]}
+                  >
+                    <Text style={styles.wordChipText}>{word}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+      </ScrollView>
+
+      <View
+        style={[
+          styles.lessonFooter,
+          feedback?.correct && styles.correctFooter,
+          feedback && !feedback.correct && styles.wrongFooter,
+        ]}
+      >
+        {feedback ? (
+          <View style={styles.feedbackCopy}>
+            <Text style={[styles.feedbackTitle, !feedback.correct && styles.feedbackTitleWrong]}>
+              {feedback.correct ? 'Correct!' : 'Incorrect'}
+            </Text>
+            <Text style={styles.feedbackBody}>
+              {feedback.correct ? '+10 XP — keep going.' : `Correct answer: ${exercise.answer}`}
+            </Text>
+          </View>
+        ) : null}
+        <PrimaryButton
+          label={feedback ? 'GOT IT' : 'CHECK'}
+          disabled={!feedback && !canCheck()}
+          onPress={feedback ? continueLesson : checkAnswer}
+        />
+      </View>
+    </SafeAreaView>
+  );
+}
+
 export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }) {
+  const { profile, syncProgress, isAuthenticated } = useAuth();
   const {
     hearts,
     maxHearts,
@@ -103,153 +283,138 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     closeOutOfHearts,
   } = useGame();
 
-  // Active Bottom Tab: 'home' | 'shop' | 'leaderboard' | 'profile' | 'chats' | 'settings'
-  const [activeTab, setActiveTab] = useState('home');
-
-  // Course Data
-  const course = useMemo(() => coursesData[courseId] || coursesData.patois, [courseId]);
-  const lessons = useMemo(() => course.units[0].lessons, [course]);
-
-  // Game States
+  const [activeTab, setActiveTab] = useState('path');
   const [completed, setCompleted] = useState([]);
-  const [xp, setXp] = useState(120);
+  const [xp, setXp] = useState(profile?.xp ?? 120);
   const [gems, setGems] = useState(565);
-  const [streak, setStreak] = useState(3);
-  const [selectedNode, setSelectedNode] = useState(null); // Node clicked for details
-  const [quizActive, setQuizActive] = useState(false); // Quick quiz modal
-  const [selectedChoice, setSelectedChoice] = useState(null);
-
-  // Shop States
+  const [streak, setStreak] = useState(profile?.streak ?? 3);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [activeLesson, setActiveLesson] = useState(null);
   const [purchasedItems, setPurchasedItems] = useState([]);
 
-  // Chats States
-  const [chatMessages, setChatMessages] = useState([
-    { id: 1, sender: 'bot', text: 'Wah gwaan! Ready to learn some phrases today? 🇯🇲' },
-  ]);
-  const [chatInput, setChatInput] = useState('');
+  useEffect(() => {
+    if (profile) {
+      setXp(profile.xp ?? 0);
+      setStreak(profile.streak ?? 0);
+    }
+  }, [profile?.xp, profile?.streak]);
 
-  // Node details
-  const activeNodeIndex = useMemo(() => {
-    return lessons.findIndex((node) => !completed.includes(node.id) && node.type !== 'chest');
-  }, [lessons, completed]);
+  const course = useMemo(() => {
+    const selectedCourse = getCourseById(courseId);
+    return {
+      ...selectedCourse,
+      units: getPublishedUnits(courseId),
+    };
+  }, [courseId]);
+  const lessons = useMemo(
+    () => course.units.flatMap((unit) => unit.lessons),
+    [course]
+  );
+  const playableLessons = useMemo(
+    () => lessons.filter((lesson) => lesson.type !== 'chest'),
+    [lessons]
+  );
 
   const activeNodeId = useMemo(() => {
-    const act = lessons[activeNodeIndex];
-    return act ? act.id : null;
-  }, [lessons, activeNodeIndex]);
-
-  const progress = useMemo(() => {
-    const playableLessons = lessons.filter(l => l.type !== 'chest');
-    const donePlayable = completed.filter(id => {
-      const lesson = lessons.find(l => l.id === id);
-      return lesson && lesson.type !== 'chest';
+    const next = lessons.find((lesson, index) => {
+      const previousComplete = index === 0 || completed.includes(lessons[index - 1].id);
+      return previousComplete && !completed.includes(lesson.id) && lesson.type !== 'chest';
     });
-    return playableLessons.length > 0 ? donePlayable.length / playableLessons.length : 0;
-  }, [lessons, completed]);
+    return next?.id;
+  }, [completed, lessons]);
 
-  // Handle node tap
   function handleNodePress(node, index) {
     const isLocked = index > 0 && !completed.includes(lessons[index - 1].id);
     if (isLocked) {
-      Alert.alert('Lesson Locked', 'Please complete the previous lessons first to unlock this unit!');
+      Alert.alert('Lesson locked', 'Finish the previous step first to unlock this lesson.');
       return;
     }
 
     if (node.type === 'chest') {
-      if (node.claimed || completed.includes(node.id)) {
-        Alert.alert('Already Claimed', 'You have already opened this treasure chest!');
+      if (completed.includes(node.id)) {
+        Alert.alert('Already opened', 'You claimed this reward already.');
         return;
       }
-      // Claim chest rewards
-      setGems((g) => g + 25);
-      setXp((x) => x + node.xp);
-      setCompleted((prev) => [...prev, node.id]);
-      Alert.alert('Chest Opened! 🎁', `You claimed ${node.xp} XP and 25 Gems!`);
+      setGems((current) => current + 25);
+      setXp((current) => current + node.xp);
+      setCompleted((current) => [...current, node.id]);
+      Alert.alert('Chest opened! 🎁', `You earned ${node.xp} XP and 25 gems.`);
       return;
     }
 
     setSelectedNode({ ...node, index });
   }
 
-  // Quiz Handling
-  const quiz = selectedNode?.quiz;
-  const isQuizCorrect = selectedChoice === quiz?.answer;
-
-  function handleChoicePress(choice) {
-    if (!hasHearts || isQuizCorrect || choice === selectedChoice) return;
-    setSelectedChoice(choice);
-    if (choice !== quiz.answer) {
-      loseHeart();
+  function startLesson() {
+    if (!hasHearts) {
+      Alert.alert('No hearts left', 'Refill hearts from the shop or wait before starting another lesson.');
+      return;
     }
-  }
-
-  function handleCompleteQuiz() {
-    if (!isQuizCorrect) return;
-
-    if (selectedNode) {
-      if (!completed.includes(selectedNode.id)) {
-        setCompleted((prev) => [...prev, selectedNode.id]);
-        setXp((prev) => prev + selectedNode.xp);
-        // Chance to increase streak
-        if (completed.length === 0) setStreak((s) => s + 1);
-      }
-    }
-
-    // Reset
-    setSelectedChoice(null);
-    setQuizActive(false);
+    setActiveLesson(selectedNode);
     setSelectedNode(null);
   }
 
-  // Shop actions
+  function completeLesson() {
+    if (activeLesson && !completed.includes(activeLesson.id)) {
+      const nextXp = xp + activeLesson.xp;
+      const nextStreak = completed.length === 0 ? streak + 1 : streak;
+
+      setCompleted((current) => [...current, activeLesson.id]);
+      setXp(nextXp);
+      setGems((current) => current + 5);
+      if (completed.length === 0) {
+        setStreak(nextStreak);
+      }
+
+      if (isAuthenticated) {
+        syncProgress({
+          xp: nextXp,
+          streak: nextStreak,
+          currentCourse: courseId,
+          currentLesson: activeLesson.id,
+        });
+      }
+    }
+    setActiveLesson(null);
+  }
+
   function buyItem(itemId, cost) {
     if (gems < cost) {
-      Alert.alert('Not enough gems', 'Earn more gems by completing lessons and opening chests.');
+      Alert.alert('Not enough gems', 'Complete lessons and open chests to earn more.');
       return;
     }
-    setGems((g) => g - cost);
-    setPurchasedItems((prev) => [...prev, itemId]);
+
+    setGems((current) => current - cost);
+    setPurchasedItems((current) => [...current, itemId]);
     if (itemId === 'refill') {
       refillHearts();
-      Alert.alert('Hearts Refilled! ❤️', 'Your hearts have been fully restored.');
+      Alert.alert('Hearts refilled!', 'You are ready for more lessons.');
     } else {
-      Alert.alert('Purchased! 🛍️', 'This item is now active in your profile.');
+      Alert.alert('Purchased!', 'This boost is now active.');
     }
   }
 
-  // Chat Actions
-  function sendChatMessage() {
-    if (!chatInput.trim()) return;
-    const userMsg = { id: Date.now(), sender: 'user', text: chatInput };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput('');
-
-    // Mock bot reply after 1s
-    setTimeout(() => {
-      let replyText = 'Respect! That sounds good. 👍';
-      if (courseId === 'patois') {
-        replyText = 'Likkle more! Let us practice more Jamaican talk. Do you know what "Bless up" means?';
-      } else if (courseId === 'swahili') {
-        replyText = 'Karibu! Kiswahili is beautiful. Sijambo!';
-      }
-      setChatMessages((prev) => [
-        ...prev,
-        { id: Date.now() + 1, sender: 'bot', text: replyText },
-      ]);
-    }, 1000);
+  if (activeLesson) {
+    return (
+      <LessonPlayer
+        lesson={activeLesson}
+        hearts={hearts}
+        maxHearts={maxHearts}
+        onExit={() => setActiveLesson(null)}
+        onMistake={loseHeart}
+        onComplete={completeLesson}
+      />
+    );
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-
-      {/* Top Header Stats Bar */}
+      <StatusBar style="light" />
       <View style={styles.topBar}>
         <Pressable onPress={onBack} style={styles.courseSelectButton}>
           <Text style={styles.courseFlag}>{course.flag}</Text>
-          <Text style={styles.courseText}>▼</Text>
+          <Text style={styles.courseChevron}>⌄</Text>
         </Pressable>
-
         <View style={styles.statsContainer}>
           <View style={styles.statPill}>
             <Text style={styles.statIcon}>🔥</Text>
@@ -263,468 +428,245 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
         </View>
       </View>
 
-      {!hasHearts && (
-        <View style={styles.noHeartsBanner}>
-          <Text style={styles.noHeartsTitle}>No Hearts Left 💔</Text>
-          <Text style={styles.noHeartsText}>
-            Tap a chest, buy refills in the shop, or wait for automatic refill.
-          </Text>
-        </View>
-      )}
-
-      {/* MAIN VIEW AREA (Rendered based on selected tab) */}
       <View style={styles.mainContainer}>
-        {activeTab === 'home' && (
-          <ScrollView
-            contentContainerStyle={styles.pathScrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Unit Header Card */}
-            <View style={[styles.unitHeaderCard, { backgroundColor: course.themeColor }]}>
-              <View style={styles.unitHeaderTextCol}>
-                <Text style={styles.unitNumberText}>{course.units[0].title}</Text>
-                <Text style={styles.unitDescText}>{course.units[0].description}</Text>
-              </View>
-              <Pressable
-                onPress={() =>
-                  Alert.alert(
-                    'Unit Details',
-                    `This unit covers: Greetings, vocabulary and dialogue practice in ${course.title}.`
-                  )
-                }
-                style={styles.notebookBtn}
-              >
-                <Text style={styles.notebookEmoji}>📓</Text>
-              </Pressable>
-            </View>
+        {activeTab === 'path' ? (
+          <ScrollView contentContainerStyle={styles.pathContent} showsVerticalScrollIndicator={false}>
+            {course.units.map((unit) => {
+              const unitColor = unit.themeColor || course.themeColor;
+              const firstGlobalIndex = lessons.findIndex((lesson) => lesson.id === unit.lessons[0]?.id);
+              const playableInUnit = unit.lessons.filter((lesson) => lesson.type !== 'chest');
+              const completedInUnit = playableInUnit.filter((lesson) => completed.includes(lesson.id)).length;
+              const unitProgress = playableInUnit.length ? completedInUnit / playableInUnit.length : 0;
+              const containsActiveLesson = unit.lessons.some((lesson) => lesson.id === activeNodeId);
 
-            {/* Winding Nodes Path Map */}
-            <View style={styles.pathMapContainer}>
-              {lessons.map((node, index) => {
-                const isCompleted = completed.includes(node.id);
-                const isLocked = index > 0 && !completed.includes(lessons[index - 1].id);
-                const isActive = node.id === activeNodeId && !isLocked && !isCompleted;
+              return (
+                <View key={unit.id} style={styles.unitSection}>
+                  <LinearGradient
+                    colors={[unitColor, colors.splashWarm]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.unitHeaderCard}
+                  >
+                    <View style={styles.unitCopy}>
+                      <Text style={styles.unitEyebrow}>{unit.title}</Text>
+                      <Text style={styles.unitTitle}>{unit.description}</Text>
+                      <Text style={styles.unitSubcopy}>{unit.goal}</Text>
+                    </View>
+                    <View style={styles.unitBook}>
+                      <Text style={styles.unitBookIcon}>📚</Text>
+                    </View>
+                  </LinearGradient>
 
-                return (
-                  <PathNode
-                    key={node.id}
-                    node={node}
-                    index={index}
-                    isCompleted={isCompleted}
-                    isActive={isActive}
-                    isLocked={isLocked}
-                    themeColor={course.themeColor}
-                    accentColor={course.accentColor}
-                    onPress={() => handleNodePress(node, index)}
-                  />
-                );
-              })}
+                  <View style={styles.progressCard}>
+                    <Text style={styles.progressLabel}>Unit progress</Text>
+                    <Text style={styles.progressValue}>{Math.round(unitProgress * 100)}%</Text>
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${Math.round(unitProgress * 100)}%`,
+                            backgroundColor: unitColor,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
 
-              {/* Absolutely Positioned Mascot Character on path */}
-              <View style={styles.mascotContainer}>
-                <MascotHero />
-                <View style={styles.starsRow}>
-                  <Text style={styles.mascotStar}>⭐</Text>
-                  <Text style={styles.mascotStar}>⭐</Text>
-                  <Text style={styles.mascotStar}>⭐</Text>
+                  <View style={styles.pathMapContainer}>
+                    {unit.lessons.map((node, unitIndex) => {
+                      const globalIndex = firstGlobalIndex + unitIndex;
+                      const isCompleted = completed.includes(node.id);
+                      const isLocked = globalIndex > 0 && !completed.includes(lessons[globalIndex - 1].id);
+                      const isActive = node.id === activeNodeId && !isLocked && !isCompleted;
+
+                      return (
+                        <PathNode
+                          key={node.id}
+                          node={node}
+                          index={unitIndex}
+                          isCompleted={isCompleted}
+                          isActive={isActive}
+                          isLocked={isLocked}
+                          themeColor={unitColor}
+                          accentColor={course.accentColor}
+                          onPress={() => handleNodePress(node, globalIndex)}
+                        />
+                      );
+                    })}
+                    {containsActiveLesson ? (
+                      <View style={styles.mascotContainer}>
+                        <MascotHero />
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
-              </View>
-            </View>
+              );
+            })}
           </ScrollView>
-        )}
+        ) : null}
 
-        {/* SHOP TAB */}
-        {activeTab === 'shop' && (
+        {activeTab === 'shop' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-            <Text style={styles.tabTitle}>Diaspora Shop 💎</Text>
-            <Text style={styles.tabSubtitle}>Spend gems to purchase exclusive items and powerups.</Text>
-
-            <View style={styles.shopItem}>
-              <Text style={styles.shopItemEmoji}>❤️</Text>
-              <View style={styles.shopItemDetails}>
-                <Text style={styles.shopItemName}>Refill Hearts</Text>
-                <Text style={styles.shopItemDesc}>Instantly restores all 5 hearts</Text>
-              </View>
-              <Pressable onPress={() => buyItem('refill', 150)} style={styles.buyButton}>
-                <Text style={styles.buyButtonText}>150 💎</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.shopItem}>
-              <Text style={styles.shopItemEmoji}>🔥</Text>
-              <View style={styles.shopItemDetails}>
-                <Text style={styles.shopItemName}>Streak Freeze</Text>
-                <Text style={styles.shopItemDesc}>Keep your streak active if you miss a day</Text>
-              </View>
-              <Pressable
-                disabled={purchasedItems.includes('freeze')}
-                onPress={() => buyItem('freeze', 300)}
-                style={[styles.buyButton, purchasedItems.includes('freeze') && styles.buyButtonDisabled]}
-              >
-                <Text style={styles.buyButtonText}>
-                  {purchasedItems.includes('freeze') ? 'ACTIVE' : '300 💎'}
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.shopItem}>
-              <Text style={styles.shopItemEmoji}>🎩</Text>
-              <View style={styles.shopItemDetails}>
-                <Text style={styles.shopItemName}>Mascot Hat</Text>
-                <Text style={styles.shopItemDesc}>Dress the mascot in a cool diaspora headwear</Text>
-              </View>
-              <Pressable
-                disabled={purchasedItems.includes('hat')}
-                onPress={() => buyItem('hat', 400)}
-                style={[styles.buyButton, purchasedItems.includes('hat') && styles.buyButtonDisabled]}
-              >
-                <Text style={styles.buyButtonText}>
-                  {purchasedItems.includes('hat') ? 'EQUIPPED' : '400 💎'}
-                </Text>
-              </Pressable>
-            </View>
+            <Text style={styles.tabTitle}>Shop 💎</Text>
+            <Text style={styles.tabSubtitle}>Use gems for boosts that keep lessons moving.</Text>
+            <ShopItem emoji="❤️" title="Refill Hearts" detail="Restore all 5 hearts instantly." action="150 💎" onPress={() => buyItem('refill', 150)} />
+            <ShopItem
+              emoji="🔥"
+              title="Streak Freeze"
+              detail="Protect your streak if you miss a day."
+              action={purchasedItems.includes('freeze') ? 'ACTIVE' : '300 💎'}
+              disabled={purchasedItems.includes('freeze')}
+              onPress={() => buyItem('freeze', 300)}
+            />
+            <ShopItem
+              emoji="🎩"
+              title="Mascot Hat"
+              detail="Give your guide a fresh lesson look."
+              action={purchasedItems.includes('hat') ? 'OWNED' : '400 💎'}
+              disabled={purchasedItems.includes('hat')}
+              onPress={() => buyItem('hat', 400)}
+            />
           </ScrollView>
-        )}
+        ) : null}
 
-        {/* LEADERBOARD TAB */}
-        {activeTab === 'leaderboard' && (
+        {activeTab === 'leaderboard' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-            <Text style={styles.tabTitle}>Leaderboard 🏆</Text>
-            <Text style={styles.tabSubtitle}>Compete weekly with other learners in the diaspora.</Text>
-
-            <View style={styles.leaderRow}>
-              <Text style={styles.leaderRank}>🥇</Text>
-              <Text style={styles.leaderName}>Aisha S.</Text>
-              <Text style={styles.leaderXp}>1,450 XP</Text>
-            </View>
-            <View style={styles.leaderRow}>
-              <Text style={styles.leaderRank}>🥈</Text>
-              <Text style={styles.leaderName}>Kofi B.</Text>
-              <Text style={styles.leaderXp}>1,210 XP</Text>
-            </View>
-            <View style={styles.leaderRow}>
-              <Text style={styles.leaderRank}>🥉</Text>
-              <Text style={styles.leaderName}>Marcus J.</Text>
-              <Text style={styles.leaderXp}>980 XP</Text>
-            </View>
-            <View style={[styles.leaderRow, styles.leaderRowUser]}>
-              <Text style={styles.leaderRank}>4</Text>
-              <Text style={[styles.leaderName, styles.bold]}>You (Learner)</Text>
-              <Text style={styles.leaderXp}>{xp} XP</Text>
-            </View>
+            <Text style={styles.tabTitle}>Leagues 🏆</Text>
+            <Text style={styles.tabSubtitle}>Climb by finishing lessons and keeping your streak alive.</Text>
+            {[
+              ['🥇', 'Aisha S.', '1,450 XP'],
+              ['🥈', 'Kofi B.', '1,210 XP'],
+              ['🥉', 'Marcus J.', '980 XP'],
+              ['4', 'You', `${xp} XP`],
+            ].map(([rank, name, score]) => (
+              <View key={name} style={[styles.leaderRow, name === 'You' && styles.leaderRowUser]}>
+                <Text style={styles.leaderRank}>{rank}</Text>
+                <Text style={styles.leaderName}>{name}</Text>
+                <Text style={styles.leaderXp}>{score}</Text>
+              </View>
+            ))}
           </ScrollView>
-        )}
+        ) : null}
 
-        {/* PROFILE TAB */}
-        {activeTab === 'profile' && (
+        {activeTab === 'profile' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
             <View style={styles.profileHeader}>
               <View style={styles.avatarCircle}>
                 <Text style={styles.avatarEmoji}>🦉</Text>
               </View>
               <Text style={styles.profileName}>Diaspora Scholar</Text>
-              <Text style={styles.profileNative}>Native Language: {userLanguage?.toUpperCase() || 'ENGLISH'}</Text>
+              <Text style={styles.profileNative}>Native language: {userLanguage?.toUpperCase() || 'ENGLISH'}</Text>
             </View>
-
-            <Text style={styles.sectionLabel}>Your Statistics</Text>
-            <View style={styles.statsCardGrid}>
-              <View style={styles.statsCardGridItem}>
-                <Text style={styles.gridStatVal}>{xp}</Text>
-                <Text style={styles.gridStatLbl}>Total XP</Text>
-              </View>
-              <View style={styles.statsCardGridItem}>
-                <Text style={styles.gridStatVal}>{streak} Days</Text>
-                <Text style={styles.gridStatLbl}>Active Streak</Text>
-              </View>
-              <View style={styles.statsCardGridItem}>
-                <Text style={styles.gridStatVal}>{gems}</Text>
-                <Text style={styles.gridStatLbl}>Gems Balance</Text>
-              </View>
-              <View style={styles.statsCardGridItem}>
-                <Text style={styles.gridStatVal}>{completed.length}</Text>
-                <Text style={styles.gridStatLbl}>Completed Steps</Text>
-              </View>
+            <View style={styles.statsGrid}>
+              <StatCard label="Total XP" value={xp} />
+              <StatCard label="Streak" value={`${streak} days`} />
+              <StatCard label="Gems" value={gems} />
+              <StatCard label="Lessons" value={completed.filter((id) => playableLessons.some((lesson) => lesson.id === id)).length} />
             </View>
           </ScrollView>
-        )}
+        ) : null}
 
-        {/* CHATS TAB */}
-        {activeTab === 'chats' && (
-          <View style={styles.chatsContainer}>
-            <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>Chat with Duo 🦉</Text>
-              <Text style={styles.chatStatus}>Practice your chosen course dialect</Text>
-            </View>
-
-            <ScrollView
-              style={styles.chatMsgScroll}
-              contentContainerStyle={{ padding: spacing.md }}
-              showsVerticalScrollIndicator={false}
-            >
-              {chatMessages.map((msg) => (
-                <View
-                  key={msg.id}
-                  style={[
-                    styles.chatBubble,
-                    msg.sender === 'user' ? styles.chatBubbleUser : styles.chatBubbleBot,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.chatText,
-                      msg.sender === 'user' ? styles.chatTextUser : styles.chatTextBot,
-                    ]}
-                  >
-                    {msg.text}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            <View style={styles.chatInputRow}>
-              <TextInput
-                value={chatInput}
-                onChangeText={setChatInput}
-                placeholder="Type here..."
-                style={styles.chatTextInput}
-                onSubmitEditing={sendChatMessage}
-              />
-              <Pressable onPress={sendChatMessage} style={styles.chatSendBtn}>
-                <Text style={styles.chatSendBtnText}>➔</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
-        {/* SETTINGS TAB */}
-        {activeTab === 'settings' && (
+        {activeTab === 'settings' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
             <Text style={styles.tabTitle}>Settings ⚙️</Text>
-            <Text style={styles.tabSubtitle}>Configure preferences for your learning experience.</Text>
-
-            <View style={styles.settingOption}>
-              <Text style={styles.settingName}>Sound Effects</Text>
-              <View style={styles.switchMockActive}>
-                <View style={styles.switchMockKnobActive} />
-              </View>
-            </View>
-
-            <View style={styles.settingOption}>
-              <Text style={styles.settingName}>Daily Reminders</Text>
-              <View style={styles.switchMockActive}>
-                <View style={styles.switchMockKnobActive} />
-              </View>
-            </View>
-
-            <View style={styles.settingOption}>
-              <Text style={styles.settingName}>Dark Theme (Beta)</Text>
-              <View style={styles.switchMockInactive}>
-                <View style={styles.switchMockKnobInactive} />
-              </View>
-            </View>
-
-            <Pressable
-              onPress={() => {
-                Alert.alert('Reset Progress', 'Are you sure you want to clear your learning streak?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Reset',
-                    style: 'destructive',
-                    onPress: () => {
-                      setCompleted([]);
-                      setXp(0);
-                      setStreak(0);
-                      setGems(100);
-                      Alert.alert('Cleared!', 'All progress reset.');
-                    },
-                  },
-                ]);
-              }}
-              style={styles.resetButton}
-            >
-              <Text style={styles.resetButtonText}>Reset My Progress</Text>
-            </Pressable>
+            <Text style={styles.tabSubtitle}>Lesson-focused settings for the learning path.</Text>
+            <SettingRow label="Sound effects" active />
+            <SettingRow label="Daily reminders" active />
+            <SettingRow label="Dark theme" active />
           </ScrollView>
-        )}
+        ) : null}
       </View>
 
-      {/* NODE CLICK DETAIL OVERLAY (Bottom Sheet Popover style) */}
-      {selectedNode && (
-        <Modal animationType="slide" transparent visible={!!selectedNode}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.bottomSheet}>
-              <View style={styles.bottomSheetHeader}>
-                <Text style={styles.bottomSheetTitle}>{selectedNode.title}</Text>
-                <Pressable onPress={() => setSelectedNode(null)} style={styles.closeBtn}>
-                  <Text style={styles.closeBtnText}>✕</Text>
-                </Pressable>
-              </View>
+      <LessonPreview node={selectedNode} course={course} onClose={() => setSelectedNode(null)} onStart={startLesson} />
 
-              <Text style={styles.bottomSheetSub}>{selectedNode.subtitle}</Text>
+      <OutOfHeartsModal visible={showOutOfHearts} onClose={closeOutOfHearts} onRefill={refillHearts} />
 
-              <View style={styles.bottomSheetDetailsCard}>
-                <Text style={styles.phraseLabel}>TARGET PHRASE:</Text>
-                <Text style={styles.phraseVal}>{selectedNode.phrase}</Text>
-                <Text style={styles.meaningVal}>"{selectedNode.meaning}"</Text>
-
-                <View style={styles.divider} />
-                <Text style={styles.culturalNoteTitle}>💡 Cultural Context</Text>
-                <Text style={styles.culturalNoteText}>{selectedNode.note}</Text>
-              </View>
-
-              <View style={styles.bottomSheetFooter}>
-                <PrimaryButton
-                  label={`START LESSON (+${selectedNode.xp} XP)`}
-                  disabled={!hasHearts}
-                  onPress={() => setQuizActive(true)}
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* QUIZ MODAL OVERLAY */}
-      {quizActive && quiz && (
-        <Modal animationType="slide" visible={quizActive}>
-          <SafeAreaView style={styles.quizSafeArea}>
-            <View style={styles.quizHeader}>
-              <Pressable
-                onPress={() => {
-                  setSelectedChoice(null);
-                  setQuizActive(false);
-                }}
-                style={styles.quizCloseBtn}
-              >
-                <Text style={styles.quizCloseBtnText}>✕</Text>
-              </Pressable>
-              <View style={styles.quizProgressTrack}>
-                <View style={[styles.quizProgressFill, { width: selectedChoice ? '100%' : '50%' }]} />
-              </View>
-            </View>
-
-            <View style={styles.quizBody}>
-              <Text style={styles.quizPrompt}>{quiz.prompt}</Text>
-
-              <View style={styles.quizChoicesList}>
-                {quiz.choices.map((choice) => {
-                  const isSelected = selectedChoice === choice;
-                  const isCorrect = choice === quiz.answer;
-                  const showSuccess = selectedChoice && isCorrect;
-                  const showFailure = isSelected && !isCorrect;
-
-                  return (
-                    <Pressable
-                      key={choice}
-                      disabled={selectedChoice !== null}
-                      onPress={() => handleChoicePress(choice)}
-                      style={[
-                        styles.quizChoiceCard,
-                        isSelected && styles.quizChoiceSelected,
-                        showSuccess && styles.quizChoiceCorrect,
-                        showFailure && styles.quizChoiceWrong,
-                      ]}
-                    >
-                      <Text style={styles.quizChoiceText}>{choice}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Verification & Success Bottom Banner */}
-            <View style={styles.quizFooter}>
-              {selectedChoice ? (
-                <View
-                  style={[
-                    styles.quizFeedbackBox,
-                    isQuizCorrect ? styles.quizFeedbackSuccess : styles.quizFeedbackError,
-                  ]}
-                >
-                  <Text style={styles.quizFeedbackTitle}>
-                    {isQuizCorrect ? 'Correct! 🎉' : 'Incorrect choice 💔'}
-                  </Text>
-                  <Text style={styles.quizFeedbackBody}>
-                    {isQuizCorrect
-                      ? 'You successfully understood the expression.'
-                      : `The correct translation was "${quiz.answer}".`}
-                  </Text>
-                  <View style={{ marginTop: spacing.md }}>
-                    <PrimaryButton label="CONTINUE" onPress={handleCompleteQuiz} />
-                  </View>
-                </View>
-              ) : (
-                <Text style={styles.chooseToVerifyText}>Select an option above to verify your answer</Text>
-              )}
-            </View>
-          </SafeAreaView>
-        </Modal>
-      )}
-
-      {/* Out of Hearts dialog */}
-      <OutOfHeartsModal
-        visible={showOutOfHearts}
-        onClose={closeOutOfHearts}
-        onRefill={refillHearts}
-      />
-
-      {/* BOTTOM TAB BAR NAVIGATION */}
       <View style={styles.bottomTabBar}>
-        <Pressable
-          onPress={() => setActiveTab('home')}
-          style={[styles.tabItem, activeTab === 'home' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>🏠</Text>
-          <Text style={[styles.tabItemText, activeTab === 'home' && { color: course.themeColor }]}>Path</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('shop')}
-          style={[styles.tabItem, activeTab === 'shop' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>🛍️</Text>
-          <Text style={[styles.tabItemText, activeTab === 'shop' && { color: course.themeColor }]}>Shop</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('leaderboard')}
-          style={[styles.tabItem, activeTab === 'leaderboard' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>🏆</Text>
-          <Text style={[styles.tabItemText, activeTab === 'leaderboard' && { color: course.themeColor }]}>Leagues</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('profile')}
-          style={[styles.tabItem, activeTab === 'profile' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>👤</Text>
-          <Text style={[styles.tabItemText, activeTab === 'profile' && { color: course.themeColor }]}>Profile</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('chats')}
-          style={[styles.tabItem, activeTab === 'chats' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>🦉</Text>
-          <Text style={[styles.tabItemText, activeTab === 'chats' && { color: course.themeColor }]}>Chats</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('settings')}
-          style={[styles.tabItem, activeTab === 'settings' && styles.tabItemActive]}
-        >
-          <Text style={styles.tabItemEmoji}>⚙️</Text>
-          <Text style={[styles.tabItemText, activeTab === 'settings' && { color: course.themeColor }]}>Settings</Text>
-        </Pressable>
+        <TabButton icon="🏠" label="Path" active={activeTab === 'path'} color={course.themeColor} onPress={() => setActiveTab('path')} />
+        <TabButton icon="🛍️" label="Shop" active={activeTab === 'shop'} color={course.themeColor} onPress={() => setActiveTab('shop')} />
+        <TabButton icon="🏆" label="Leagues" active={activeTab === 'leaderboard'} color={course.themeColor} onPress={() => setActiveTab('leaderboard')} />
+        <TabButton icon="👤" label="Profile" active={activeTab === 'profile'} color={course.themeColor} onPress={() => setActiveTab('profile')} />
+        <TabButton icon="⚙️" label="Settings" active={activeTab === 'settings'} color={course.themeColor} onPress={() => setActiveTab('settings')} />
       </View>
     </SafeAreaView>
   );
 }
 
+function LessonPreview({ node, course, onClose, onStart }) {
+  return (
+    <Modal animationType="slide" transparent visible={Boolean(node)} onRequestClose={onClose}>
+      <View style={styles.previewBackdrop}>
+        <View style={styles.previewSheet}>
+          <Pressable onPress={onClose} style={styles.previewClose}>
+            <Text style={styles.previewCloseText}>×</Text>
+          </Pressable>
+          <Text style={styles.previewTitle}>{node?.phrase}</Text>
+          <Text style={styles.previewSubtitle}>{node?.title}</Text>
+          <View style={styles.previewCard}>
+            <Text style={styles.previewLabel}>In this lesson</Text>
+            <Text style={styles.previewPhrase}>{node?.phrase}</Text>
+            <Text style={styles.previewMeaning}>{node?.meaning}</Text>
+            <View style={styles.contextRow}>
+              <Text style={styles.contextIcon}>💡</Text>
+              <Text style={styles.contextTitle}>Cultural context</Text>
+            </View>
+            <Text style={styles.previewNote}>{node?.note}</Text>
+          </View>
+          <PrimaryButton label={`START LESSON (+${node?.xp || 0} XP)`} onPress={onStart} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function TabButton({ icon, label, active, color, onPress }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.tabItem, active && styles.tabItemActive]}>
+      <Text style={styles.tabItemEmoji}>{icon}</Text>
+      <Text style={[styles.tabItemText, active && { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function ShopItem({ emoji, title, detail, action, disabled, onPress }) {
+  return (
+    <View style={styles.shopItem}>
+      <Text style={styles.shopEmoji}>{emoji}</Text>
+      <View style={styles.shopCopy}>
+        <Text style={styles.shopTitle}>{title}</Text>
+        <Text style={styles.shopDetail}>{detail}</Text>
+      </View>
+      <Pressable disabled={disabled} onPress={onPress} style={[styles.buyButton, disabled && styles.buyButtonDisabled]}>
+        <Text style={styles.buyButtonText}>{action}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statCardValue}>{value}</Text>
+      <Text style={styles.statCardLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SettingRow({ label, active }) {
+  return (
+    <View style={styles.settingRow}>
+      <Text style={styles.settingName}>{label}</Text>
+      <View style={[styles.switchTrack, active && styles.switchTrackActive]}>
+        <View style={[styles.switchKnob, active && styles.switchKnobActive]} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.splash,
     flex: 1,
   },
   topBar: {
@@ -732,26 +674,28 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
     flexDirection: 'row',
-    height: 58,
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   courseSelectButton: {
     alignItems: 'center',
+    backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 2,
     flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   courseFlag: {
     fontSize: 24,
   },
-  courseText: {
-    color: colors.textLight,
-    fontSize: 10,
+  courseChevron: {
+    color: colors.textMuted,
+    fontFamily: fonts.bold,
+    fontSize: 16,
   },
   statsContainer: {
     alignItems: 'center',
@@ -760,626 +704,438 @@ const styles = StyleSheet.create({
   },
   statPill: {
     alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     borderRadius: radius.pill,
-    borderWidth: 1,
     flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  statIcon: {
-    fontSize: 15,
-  },
-  statText: {
-    color: colors.textDark,
-    fontFamily: fonts.black,
-    fontSize: 13,
-  },
-  noHeartsBanner: {
-    backgroundColor: colors.errorBg,
-    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
-  noHeartsTitle: {
-    color: colors.error,
-    fontFamily: fonts.extraBold,
-    fontSize: 14,
+  statIcon: {
+    fontSize: 17,
   },
-  noHeartsText: {
-    color: colors.textMuted,
-    fontFamily: fonts.medium,
-    fontSize: 12,
+  statText: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 16,
   },
   mainContainer: {
     flex: 1,
+    paddingBottom: 72,
   },
-  pathScrollContent: {
-    paddingBottom: 110, // padding for character & footer
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+  pathContent: {
+    padding: spacing.md,
+    paddingBottom: 140,
+  },
+  unitSection: {
+    marginBottom: spacing.xl,
   },
   unitHeaderCard: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    minHeight: 132,
+    overflow: 'hidden',
+    padding: spacing.lg,
+  },
+  unitCopy: {
+    flex: 1,
+  },
+  unitEyebrow: {
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: fonts.black,
+    fontSize: 13,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  unitTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 27,
+    lineHeight: 34,
+    marginTop: spacing.xs,
+  },
+  unitSubcopy: {
+    color: 'rgba(255,255,255,0.75)',
+    fontFamily: fonts.semiBold,
+    fontSize: 13,
+    marginTop: spacing.sm,
+  },
+  unitBook: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderRadius: radius.xl,
+    height: 74,
+    justifyContent: 'center',
+    width: 74,
+  },
+  unitBookIcon: {
+    fontSize: 34,
+  },
+  progressCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    marginTop: spacing.md,
     padding: spacing.md,
   },
-  unitHeaderTextCol: {
-    flex: 1,
-    paddingRight: spacing.sm,
+  progressLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.bold,
+    fontSize: 13,
   },
-  unitNumberText: {
-    color: 'rgba(255, 255, 255, 0.85)',
+  progressValue: {
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 11,
-    letterSpacing: 0.8,
+    fontSize: 24,
+    marginTop: 2,
   },
-  unitDescText: {
-    color: colors.surface,
-    fontFamily: fonts.extraBold,
-    fontSize: 18,
-    marginTop: 4,
+  progressTrack: {
+    backgroundColor: colors.locked,
+    borderRadius: radius.pill,
+    height: 12,
+    marginTop: spacing.sm,
+    overflow: 'hidden',
   },
-  notebookBtn: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
-    borderRadius: radius.md,
-    height: 48,
-    justifyContent: 'center',
-    width: 48,
-  },
-  notebookEmoji: {
-    fontSize: 22,
+  progressFill: {
+    borderRadius: radius.pill,
+    height: '100%',
   },
   pathMapContainer: {
     alignItems: 'center',
-    marginTop: spacing.xl,
-    paddingVertical: spacing.md,
-    position: 'relative',
-    width: '100%',
+    minHeight: 560,
+    paddingTop: spacing.xl,
   },
   nodeRow: {
     alignItems: 'center',
-    height: 90,
+    height: 104,
     justifyContent: 'center',
     position: 'relative',
-    width: 80,
-    zIndex: 2,
+    width: 180,
   },
   pathLine: {
     backgroundColor: colors.border,
-    height: 90,
+    height: 78,
     position: 'absolute',
-    top: -50,
+    top: -42,
     width: 8,
-    zIndex: 1,
   },
   nodeCircle: {
     alignItems: 'center',
     backgroundColor: colors.blue,
-    borderColor: '#1899D6',
-    borderBottomWidth: 5,
-    borderRadius: radius.pill,
-    borderWidth: 0,
-    height: 60,
+    borderBottomColor: 'rgba(0,0,0,0.25)',
+    borderBottomWidth: 6,
+    borderColor: '#167EAD',
+    borderRadius: 42,
+    borderWidth: 4,
+    height: 84,
     justifyContent: 'center',
-    width: 60,
+    width: 84,
+    zIndex: 2,
   },
   nodeCompleted: {
-    borderBottomWidth: 5,
+    borderBottomColor: colors.primaryDark,
   },
   nodeActive: {
-    backgroundColor: colors.blue,
-    borderBottomWidth: 5,
+    borderWidth: 5,
   },
   nodeLocked: {
     backgroundColor: colors.locked,
-    borderBottomColor: '#BDBDBD',
+    borderColor: colors.border,
+    opacity: 0.55,
   },
-  nodeChestStyle: {
-    backgroundColor: '#FFE5B4',
-    borderBottomColor: '#D2B48C',
+  nodeChest: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accentDark,
   },
-  nodeTrophyStyle: {
-    backgroundColor: '#FFE766',
-    borderBottomColor: '#CCAC00',
+  nodeTrophy: {
+    backgroundColor: colors.purple,
+    borderColor: '#9A50D6',
   },
   nodeText: {
-    color: colors.surface,
+    color: colors.splash,
     fontFamily: fonts.black,
-    fontSize: 20,
+    fontSize: 28,
   },
   nodeTextCompleted: {
-    color: colors.surface,
+    color: colors.text,
   },
   nodeEmoji: {
-    fontSize: 26,
+    fontSize: 32,
   },
-  activeIndicatorRing: {
-    borderRadius: radius.pill,
-    borderWidth: 3,
-    height: 74,
+  activeRing: {
+    borderRadius: 50,
+    borderWidth: 4,
+    height: 100,
     position: 'absolute',
-    width: 74,
-    zIndex: -1,
+    width: 100,
   },
   mascotContainer: {
-    alignItems: 'center',
     position: 'absolute',
-    right: 8,
-    top: 140,
-    width: 100,
-    zIndex: 0,
-  },
-  starsRow: {
-    flexDirection: 'row',
-    gap: 2,
-    marginTop: 4,
-  },
-  mascotStar: {
-    color: colors.accent,
-    fontSize: 16,
+    right: 6,
+    top: 260,
+    transform: [{ scale: 0.82 }],
   },
   tabContent: {
     padding: spacing.lg,
-    paddingBottom: 80,
+    paddingBottom: 120,
   },
   tabTitle: {
-    color: colors.textDark,
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 26,
+    fontSize: 30,
   },
   tabSubtitle: {
     color: colors.textMuted,
     fontFamily: fonts.semiBold,
-    fontSize: 14,
+    fontSize: 16,
+    lineHeight: 24,
     marginBottom: spacing.lg,
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
   shopItem: {
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderBottomWidth: 3,
     borderRadius: radius.lg,
-    borderWidth: 2,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
     marginBottom: spacing.md,
     padding: spacing.md,
   },
-  shopItemEmoji: {
-    fontSize: 32,
+  shopEmoji: {
+    fontSize: 30,
   },
-  shopItemDetails: {
+  shopCopy: {
     flex: 1,
   },
-  shopItemName: {
-    color: colors.textDark,
+  shopTitle: {
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 16,
+    fontSize: 17,
   },
-  shopItemDesc: {
+  shopDetail: {
     color: colors.textMuted,
     fontFamily: fonts.medium,
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 2,
   },
   buyButton: {
     backgroundColor: colors.blue,
     borderRadius: radius.md,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   buyButtonDisabled: {
     backgroundColor: colors.locked,
   },
   buyButtonText: {
-    color: colors.surface,
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 13,
+    fontSize: 12,
   },
   leaderRow: {
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderBottomWidth: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     padding: spacing.md,
   },
   leaderRowUser: {
-    backgroundColor: colors.primaryLight + '30',
     borderColor: colors.primary,
-    borderWidth: 2,
   },
   leaderRank: {
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 18,
-    width: 24,
+    fontSize: 24,
+    width: 40,
   },
   leaderName: {
-    color: colors.textDark,
+    color: colors.text,
     flex: 1,
-    fontFamily: fonts.bold,
-    fontSize: 15,
+    fontFamily: fonts.black,
+    fontSize: 17,
   },
   leaderXp: {
-    color: colors.textMuted,
+    color: colors.accent,
     fontFamily: fonts.black,
-    fontSize: 14,
+    fontSize: 15,
   },
   profileHeader: {
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
   },
   avatarCircle: {
     alignItems: 'center',
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.pill,
-    height: 80,
-    justifyContent: 'center',
-    width: 80,
-  },
-  avatarEmoji: {
-    fontSize: 42,
-  },
-  profileName: {
-    color: colors.textDark,
-    fontFamily: fonts.black,
-    fontSize: 22,
-    marginTop: spacing.sm,
-  },
-  profileNative: {
-    color: colors.textLight,
-    fontFamily: fonts.bold,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  statsCardGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  statsCardGridItem: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderBottomWidth: 3,
-    borderRadius: radius.lg,
+    borderRadius: 56,
     borderWidth: 2,
+    height: 112,
+    justifyContent: 'center',
+    width: 112,
+  },
+  avatarEmoji: {
+    fontSize: 54,
+  },
+  profileName: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 24,
+    marginTop: spacing.md,
+  },
+  profileNative: {
+    color: colors.textMuted,
+    fontFamily: fonts.semiBold,
+    marginTop: spacing.xs,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  statCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     padding: spacing.md,
     width: '47%',
   },
-  gridStatVal: {
-    color: colors.textDark,
+  statCardValue: {
+    color: colors.text,
     fontFamily: fonts.black,
     fontSize: 22,
   },
-  gridStatLbl: {
-    color: colors.textLight,
+  statCardLabel: {
+    color: colors.textMuted,
     fontFamily: fonts.bold,
-    fontSize: 11,
-    marginTop: 2,
+    marginTop: spacing.xs,
   },
-  chatsContainer: {
-    flex: 1,
-  },
-  chatHeader: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
+  settingRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
     padding: spacing.md,
   },
-  chatTitle: {
-    color: colors.textDark,
+  settingName: {
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 20,
+    fontSize: 16,
   },
-  chatStatus: {
+  switchTrack: {
+    backgroundColor: colors.locked,
+    borderRadius: radius.pill,
+    height: 30,
+    justifyContent: 'center',
+    padding: 3,
+    width: 54,
+  },
+  switchTrackActive: {
+    backgroundColor: colors.primary,
+  },
+  switchKnob: {
+    backgroundColor: colors.text,
+    borderRadius: 12,
+    height: 24,
+    width: 24,
+  },
+  switchKnobActive: {
+    alignSelf: 'flex-end',
+  },
+  previewBackdrop: {
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  previewSheet: {
+    backgroundColor: colors.surfaceMuted,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  previewClose: {
+    alignSelf: 'flex-end',
+    padding: spacing.xs,
+  },
+  previewCloseText: {
     color: colors.textMuted,
     fontFamily: fonts.medium,
-    fontSize: 12,
+    fontSize: 34,
   },
-  chatMsgScroll: {
-    flex: 1,
+  previewTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 34,
   },
-  chatBubble: {
-    borderRadius: radius.md,
-    marginBottom: spacing.sm,
-    maxWidth: '80%',
-    padding: spacing.md,
+  previewSubtitle: {
+    color: colors.textMuted,
+    fontFamily: fonts.semiBold,
+    fontSize: 17,
+    marginTop: spacing.xs,
   },
-  chatBubbleUser: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.blue,
-  },
-  chatBubbleBot: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.surfaceMuted,
+  previewCard: {
+    backgroundColor: colors.surface,
     borderColor: colors.border,
+    borderRadius: radius.xl,
     borderWidth: 1,
+    marginVertical: spacing.lg,
+    padding: spacing.lg,
   },
-  chatText: {
-    fontSize: 15,
+  previewLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.black,
+    fontSize: 13,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
-  chatTextUser: {
-    color: colors.surface,
-    fontFamily: fonts.semiBold,
+  previewPhrase: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 34,
+    marginTop: spacing.sm,
   },
-  chatTextBot: {
-    color: colors.textDark,
-    fontFamily: fonts.semiBold,
+  previewMeaning: {
+    color: colors.blue,
+    fontFamily: fonts.black,
+    fontSize: 21,
+    marginTop: spacing.xs,
   },
-  chatInputRow: {
+  contextRow: {
+    alignItems: 'center',
     borderTopColor: colors.border,
     borderTopWidth: 1,
     flexDirection: 'row',
     gap: spacing.sm,
-    padding: spacing.md,
-  },
-  chatTextInput: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    flex: 1,
-    fontFamily: fonts.medium,
-    height: 44,
-    paddingHorizontal: spacing.md,
-  },
-  chatSendBtn: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  chatSendBtnText: {
-    color: colors.surface,
-    fontFamily: fonts.black,
-    fontSize: 18,
-  },
-  settingOption: {
-    alignItems: 'center',
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
-  },
-  settingName: {
-    color: colors.textDark,
-    fontFamily: fonts.bold,
-    fontSize: 16,
-  },
-  switchMockActive: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    height: 28,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-    width: 48,
-  },
-  switchMockKnobActive: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    height: 24,
-    width: 24,
-  },
-  switchMockInactive: {
-    backgroundColor: colors.locked,
-    borderRadius: 20,
-    height: 28,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-    width: 48,
-  },
-  switchMockKnobInactive: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    height: 24,
-    width: 24,
-  },
-  resetButton: {
-    alignItems: 'center',
-    backgroundColor: '#FFEBEB',
-    borderColor: '#FFC1C1',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    marginTop: spacing.xl,
-    paddingVertical: spacing.md,
-  },
-  resetButtonText: {
-    color: colors.error,
-    fontFamily: fonts.extraBold,
-    fontSize: 15,
-  },
-  modalOverlay: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  bottomSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: 40,
-  },
-  bottomSheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  bottomSheetTitle: {
-    color: colors.textDark,
-    fontFamily: fonts.black,
-    fontSize: 22,
-  },
-  closeBtn: {
-    padding: 4,
-  },
-  closeBtnText: {
-    color: colors.textLight,
-    fontSize: 18,
-  },
-  bottomSheetSub: {
-    color: colors.textMuted,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    marginTop: 4,
-  },
-  bottomSheetDetailsCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
     marginTop: spacing.md,
-    padding: spacing.md,
+    paddingTop: spacing.md,
   },
-  phraseLabel: {
-    color: colors.textLight,
-    fontFamily: fonts.black,
-    fontSize: 10,
-    letterSpacing: 0.6,
-  },
-  phraseVal: {
-    color: colors.textDark,
-    fontFamily: fonts.black,
-    fontSize: 28,
-    marginTop: 2,
-  },
-  meaningVal: {
-    color: colors.blue,
-    fontFamily: fonts.bold,
-    fontSize: 16,
-    marginTop: 2,
-  },
-  divider: {
-    backgroundColor: colors.border,
-    height: 1,
-    marginVertical: spacing.sm,
-  },
-  culturalNoteTitle: {
-    color: colors.textDark,
-    fontFamily: fonts.bold,
-    fontSize: 13,
-  },
-  culturalNoteText: {
-    color: colors.textMuted,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  bottomSheetFooter: {
-    marginTop: spacing.lg,
-  },
-  quizSafeArea: {
-    backgroundColor: colors.surface,
-    flex: 1,
-  },
-  quizHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    height: 56,
-    paddingHorizontal: spacing.lg,
-  },
-  quizCloseBtn: {
-    marginRight: spacing.md,
-    padding: 4,
-  },
-  quizCloseBtnText: {
-    color: colors.textMuted,
+  contextIcon: {
     fontSize: 20,
   },
-  quizProgressTrack: {
-    backgroundColor: colors.border,
-    borderRadius: radius.pill,
-    flex: 1,
-    height: 12,
-    overflow: 'hidden',
-  },
-  quizProgressFill: {
-    backgroundColor: colors.primary,
-    height: '100%',
-  },
-  quizBody: {
-    flex: 1,
-    padding: spacing.lg,
-    paddingTop: spacing.xl,
-  },
-  quizPrompt: {
-    color: colors.textDark,
+  contextTitle: {
+    color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 17,
   },
-  quizChoicesList: {
-    gap: spacing.md,
-    marginTop: spacing.xl,
-  },
-  quizChoiceCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderBottomWidth: 4,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    padding: spacing.md,
-  },
-  quizChoiceSelected: {
-    borderColor: colors.blue,
-    backgroundColor: colors.primaryLight + '10',
-  },
-  quizChoiceCorrect: {
-    backgroundColor: colors.successBg,
-    borderColor: colors.success,
-  },
-  quizChoiceWrong: {
-    backgroundColor: colors.errorBg,
-    borderColor: colors.error,
-  },
-  quizChoiceText: {
-    color: colors.textDark,
-    fontFamily: fonts.bold,
-    fontSize: 16,
-  },
-  quizFooter: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    minHeight: 100,
-    padding: spacing.lg,
-  },
-  chooseToVerifyText: {
-    color: colors.textLight,
-    fontFamily: fonts.bold,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  quizFeedbackBox: {
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  quizFeedbackSuccess: {
-    backgroundColor: colors.successBg,
-  },
-  quizFeedbackError: {
-    backgroundColor: colors.errorBg,
-  },
-  quizFeedbackTitle: {
-    color: colors.textDark,
-    fontFamily: fonts.black,
-    fontSize: 18,
-  },
-  quizFeedbackBody: {
+  previewNote: {
     color: colors.textMuted,
-    fontFamily: fonts.semiBold,
-    fontSize: 14,
-    marginTop: 4,
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: spacing.sm,
   },
   bottomTabBar: {
     backgroundColor: colors.surface,
@@ -1411,7 +1167,199 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 2,
   },
-  bold: {
-    fontWeight: 'bold',
+  lessonSafeArea: {
+    backgroundColor: '#140F0C',
+    flex: 1,
+  },
+  lessonTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  closeButton: {
+    alignItems: 'center',
+    backgroundColor: '#2B211B',
+    borderColor: '#4A3529',
+    borderRadius: 24,
+    borderWidth: 1,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  closeButtonPressed: {
+    opacity: 0.65,
+  },
+  closeButtonText: {
+    color: colors.text,
+    fontFamily: fonts.medium,
+    fontSize: 38,
+    lineHeight: 40,
+  },
+  lessonProgressTrack: {
+    backgroundColor: '#33261F',
+    borderRadius: radius.pill,
+    flex: 1,
+    height: 18,
+    overflow: 'hidden',
+  },
+  lessonProgressFill: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.pill,
+    height: '100%',
+  },
+  lessonContent: {
+    padding: spacing.lg,
+    paddingBottom: 220,
+  },
+  lessonTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 31,
+    lineHeight: 38,
+    marginBottom: spacing.lg,
+  },
+  lessonPromptRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  speechCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    flex: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  soundIcon: {
+    fontSize: 28,
+  },
+  speechTextWrap: {
+    flex: 1,
+  },
+  phraseText: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 23,
+    lineHeight: 32,
+  },
+  phraseHint: {
+    color: colors.textLight,
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+  },
+  choiceList: {
+    gap: spacing.md,
+    marginTop: spacing.xxl,
+  },
+  answerCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderBottomWidth: 5,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    padding: spacing.md,
+  },
+  answerCardSelected: {
+    backgroundColor: 'rgba(244, 185, 66, 0.14)',
+    borderColor: colors.accent,
+  },
+  answerCardText: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 20,
+    textAlign: 'center',
+  },
+  buildArea: {
+    marginTop: spacing.xl,
+  },
+  answerTray: {
+    alignContent: 'flex-start',
+    borderBottomColor: '#4A3529',
+    borderBottomWidth: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    minHeight: 76,
+    paddingBottom: spacing.md,
+  },
+  answerPlaceholder: {
+    color: colors.textLight,
+    fontFamily: fonts.bold,
+    fontSize: 15,
+  },
+  wordBank: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    marginTop: spacing.xxl,
+  },
+  wordChip: {
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderBottomWidth: 4,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  wordChipSelected: {
+    backgroundColor: '#2B211B',
+    borderColor: colors.accent,
+    borderBottomWidth: 4,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  wordChipUsed: {
+    opacity: 0.22,
+  },
+  wordChipText: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 18,
+  },
+  lessonFooter: {
+    backgroundColor: '#1E1612',
+    borderTopColor: '#2E221B',
+    borderTopWidth: 1,
+    bottom: 0,
+    left: 0,
+    padding: spacing.lg,
+    position: 'absolute',
+    right: 0,
+  },
+  correctFooter: {
+    backgroundColor: '#173823',
+  },
+  wrongFooter: {
+    backgroundColor: '#3A1D1C',
+  },
+  feedbackCopy: {
+    marginBottom: spacing.md,
+  },
+  feedbackTitle: {
+    color: colors.primary,
+    fontFamily: fonts.black,
+    fontSize: 24,
+  },
+  feedbackTitleWrong: {
+    color: colors.error,
+  },
+  feedbackBody: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 16,
+    marginTop: spacing.xs,
   },
 });

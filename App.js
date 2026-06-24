@@ -6,30 +6,46 @@ import {
   PlusJakartaSans_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { GameProvider } from './src/context/GameContext';
+import CourseSelectScreen from './src/screens/CourseSelectScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import LanguageSelectScreen from './src/screens/LanguageSelectScreen';
+import LoginScreen from './src/screens/LoginScreen';
+import SignUpScreen from './src/screens/SignUpScreen';
 import SplashScreen from './src/screens/SplashScreen';
 import WelcomeScreen from './src/screens/WelcomeScreen';
-import LanguageSelectScreen from './src/screens/LanguageSelectScreen';
-import CourseSelectScreen from './src/screens/CourseSelectScreen';
 import { colors } from './src/theme';
 
-export default function App() {
+function AppContent() {
+  const { initializing, profile, syncProgress, isAuthenticated } = useAuth();
   const [screen, setScreen] = useState('splash');
   const [userLanguage, setUserLanguage] = useState('english');
   const [selectedCourse, setSelectedCourse] = useState('patois');
-  const [fontsLoaded] = useFonts({
-    PlusJakartaSans_400Regular,
-    PlusJakartaSans_500Medium,
-    PlusJakartaSans_600SemiBold,
-    PlusJakartaSans_700Bold,
-    PlusJakartaSans_800ExtraBold,
-  });
 
-  if (!fontsLoaded) {
+  const handleHeartsSync = useCallback(
+    (hearts) => {
+      if (isAuthenticated) {
+        syncProgress({ hearts });
+      }
+    },
+    [isAuthenticated, syncProgress]
+  );
+
+  function goToPostAuthFlow() {
+    if (profile?.currentCourse) {
+      setSelectedCourse(profile.currentCourse);
+      setScreen('home');
+      return;
+    }
+
+    setScreen('language-select');
+  }
+
+  if (initializing) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colors.primary} size="large" />
@@ -38,20 +54,29 @@ export default function App() {
   }
 
   return (
-    <GameProvider>
-      {screen === 'splash' ? (
-        <SplashScreen onFinish={() => setScreen('welcome')} />
-      ) : null}
+    <GameProvider profileHearts={profile?.hearts} onHeartsSync={handleHeartsSync}>
+      {screen === 'splash' ? <SplashScreen onFinish={() => setScreen('welcome')} /> : null}
 
       {screen === 'welcome' ? (
         <WelcomeScreen
           onGetStarted={() => setScreen('language-select')}
-          onSignIn={() =>
-            Alert.alert(
-              'Coming soon',
-              'Firebase login is next on the roadmap. For now, tap Get Started to try the beginner path.'
-            )
-          }
+          onSignIn={() => setScreen('login')}
+        />
+      ) : null}
+
+      {screen === 'login' ? (
+        <LoginScreen
+          onBack={() => setScreen('welcome')}
+          onSuccess={goToPostAuthFlow}
+          onSignUp={() => setScreen('signup')}
+        />
+      ) : null}
+
+      {screen === 'signup' ? (
+        <SignUpScreen
+          onBack={() => setScreen('login')}
+          onSuccess={goToPostAuthFlow}
+          onSignIn={() => setScreen('login')}
         />
       ) : null}
 
@@ -70,6 +95,9 @@ export default function App() {
           userLanguage={userLanguage}
           onSelectCourse={(courseId) => {
             setSelectedCourse(courseId);
+            if (isAuthenticated) {
+              syncProgress({ currentCourse: courseId, currentLesson: null });
+            }
             setScreen('home');
           }}
           onBack={() => setScreen('language-select')}
@@ -84,6 +112,30 @@ export default function App() {
         />
       ) : null}
     </GameProvider>
+  );
+}
+
+export default function App() {
+  const [fontsLoaded] = useFonts({
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={colors.primary} size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
