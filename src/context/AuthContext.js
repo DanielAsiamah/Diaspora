@@ -27,14 +27,18 @@ export function AuthProvider({ children }) {
     const unsubscribe = subscribeToAuthState(async (firebaseUser) => {
       setUser(firebaseUser);
 
-      if (firebaseUser) {
-        const document = await getUserDocument(firebaseUser.uid);
-        setProfile(document);
-      } else {
+      try {
+        if (firebaseUser) {
+          const document = await getUserDocument(firebaseUser.uid);
+          setProfile(document);
+        } else {
+          setProfile(null);
+        }
+      } catch {
         setProfile(null);
+      } finally {
+        setInitializing(false);
       }
-
-      setInitializing(false);
     });
 
     return unsubscribe;

@@ -50,19 +50,15 @@ function AppContent() {
       return;
     }
 
-    if (!profile) {
-      return;
-    }
-
-    const savedLanguage = profile.baseLanguage || 'english';
-    const savedCourse = profile.currentCourse || 'patois';
+    const savedLanguage = profile?.baseLanguage || 'english';
+    const savedCourse = profile?.currentCourse || 'patois';
 
     setUserLanguage(savedLanguage);
     setSelectedCourse(savedCourse);
 
     hasResolvedInitialRoute.current = true;
 
-    if (profile.onboardingCompleted && profile.currentCourse) {
+    if (profile?.onboardingCompleted && profile?.currentCourse) {
       setScreen('home');
       return;
     }
