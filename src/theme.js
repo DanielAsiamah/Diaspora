@@ -1,4 +1,5 @@
 export const MAX_HEARTS = 5;
+export const HEART_REGEN_MS = 30 * 60 * 1000;
 
 export const colors = {
   splash: '#140F0C', // Cozy dark espresso
@@ -63,6 +64,15 @@ export const radius = {
   pill: 999,
 };
 
+export const type = {
+  display: 30,
+  title: 24,
+  heading: 20,
+  body: 14,
+  caption: 12,
+  micro: 10,
+};
+
 export const fonts = {
   regular: 'PlusJakartaSans_400Regular',
   medium: 'PlusJakartaSans_500Medium',
@@ -70,6 +80,42 @@ export const fonts = {
   bold: 'PlusJakartaSans_700Bold',
   extraBold: 'PlusJakartaSans_800ExtraBold',
   black: 'PlusJakartaSans_800ExtraBold',
+};
+
+export const shadows = {
+  card: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  soft: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+};
+
+export const ui = {
+  card: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+  },
+  elevatedCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    ...shadows.card,
+  },
+  compactCardPadding: spacing.md,
+  screenPadding: spacing.md,
+  bottomTabHeight: 66,
 };
 
 export const game = {

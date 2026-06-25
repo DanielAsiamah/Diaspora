@@ -13,9 +13,13 @@
     "expo-status-bar": "~3.0.8",
     "firebase": "^12.15.0",
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "xlsx": "^0.18.5"
   },
   "scripts": {
+    "audio:dry-run": "node scripts/generate-audio.js --dry-run",
+    "audio:generate": "node scripts/generate-audio.js",
+    "content:build": "node scripts/build-content.js",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",

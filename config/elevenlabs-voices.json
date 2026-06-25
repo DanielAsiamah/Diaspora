@@ -1,0 +1,23 @@
+{
+  "defaults": {
+    "modelId": "eleven_multilingual_v2",
+    "outputFormat": "mp3_44100_128",
+    "concurrency": 2,
+    "voiceSettings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75
+    }
+  },
+  "languages": {
+    "patois": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_PATOIS" },
+    "swahili": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_SWAHILI" },
+    "igbo": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_IGBO" },
+    "wolof": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_WOLOF" },
+    "haitian": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_HAITIAN" },
+    "nouchi": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_NOUCHI" },
+    "belizean": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_BELIZEAN" },
+    "aave": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_AAVE" },
+    "sudanese": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_SUDANESE" },
+    "nubian": { "voiceIdEnv": "ELEVENLABS_VOICE_ID_NUBIAN" }
+  }
+}

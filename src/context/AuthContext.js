@@ -7,8 +7,12 @@ import {
   subscribeToAuthState,
 } from '../services/auth/authService';
 import {
+  createLessonSession,
   createUserDocument,
+  ensureLanguageProgress,
+  getLanguageProgress,
   getUserDocument,
+  updateLanguageProgress,
   updateUserProgress,
 } from '../services/firestore/userService';
 
@@ -60,7 +64,7 @@ export function AuthProvider({ children }) {
     const document = await getUserDocument(firebaseUser.uid);
     setUser(firebaseUser);
     setProfile(document);
-    return firebaseUser;
+    return { firebaseUser, profile: document };
   }, []);
 
   const signIn = useCallback(async ({ email, password }) => {
@@ -69,7 +73,7 @@ export function AuthProvider({ children }) {
     const document = await getUserDocument(firebaseUser.uid);
     setUser(firebaseUser);
     setProfile(document);
-    return firebaseUser;
+    return { firebaseUser, profile: document };
   }, []);
 
   const signOut = useCallback(async () => {
@@ -90,6 +94,50 @@ export function AuthProvider({ children }) {
     [user]
   );
 
+  const loadLanguageProgress = useCallback(
+    async (languageId) => {
+      if (!user || !languageId) {
+        return null;
+      }
+
+      return ensureLanguageProgress(user.uid, languageId);
+    },
+    [user]
+  );
+
+  const refreshLanguageProgress = useCallback(
+    async (languageId) => {
+      if (!user || !languageId) {
+        return null;
+      }
+
+      return getLanguageProgress(user.uid, languageId);
+    },
+    [user]
+  );
+
+  const syncLanguageProgress = useCallback(
+    async (languageId, fields) => {
+      if (!user || !languageId) {
+        return;
+      }
+
+      await updateLanguageProgress(user.uid, languageId, fields);
+    },
+    [user]
+  );
+
+  const recordLessonSession = useCallback(
+    async (session) => {
+      if (!user || !session?.languageId || !session?.lessonId) {
+        return null;
+      }
+
+      return createLessonSession(user.uid, session);
+    },
+    [user]
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -101,8 +149,25 @@ export function AuthProvider({ children }) {
       signOut,
       refreshProfile,
       syncProgress,
+      loadLanguageProgress,
+      refreshLanguageProgress,
+      syncLanguageProgress,
+      recordLessonSession,
     }),
-    [user, profile, initializing, signUp, signIn, signOut, refreshProfile, syncProgress]
+    [
+      user,
+      profile,
+      initializing,
+      signUp,
+      signIn,
+      signOut,
+      refreshProfile,
+      syncProgress,
+      loadLanguageProgress,
+      refreshLanguageProgress,
+      syncLanguageProgress,
+      recordLessonSession,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

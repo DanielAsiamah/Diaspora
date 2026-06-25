@@ -36,8 +36,8 @@ export default function LoginScreen({ onSuccess, onSignUp, onBack }) {
     setLoading(true);
 
     try {
-      await signIn({ email, password });
-      onSuccess();
+      const result = await signIn({ email, password });
+      onSuccess(result?.profile);
     } catch (error) {
       setFormError(getAuthErrorMessage(error));
     } finally {

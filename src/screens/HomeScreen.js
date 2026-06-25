@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAudioPlayer } from 'expo-audio';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Alert,
   Modal,
@@ -18,10 +18,23 @@ import HeartsBar from '../components/HeartsBar';
 import MascotHero from '../components/MascotHero';
 import OutOfHeartsModal from '../components/OutOfHeartsModal';
 import PrimaryButton from '../components/PrimaryButton';
+import LessonCutscene from '../components/lesson/LessonCutscene';
+import LessonStepRenderer from '../components/lesson/LessonStepRenderer';
+import TeachingSlide from '../components/lesson/TeachingSlide';
+import VocabularyCard from '../components/lesson/VocabularyCard';
 import { useAuth } from '../context/AuthContext';
 import { useGame } from '../context/GameContext';
 import { getCourseById, getPublishedUnits } from '../data/curriculumRepository';
-import { colors, fonts, radius, spacing } from '../theme';
+import { getLessonAudioSource } from '../data/generatedAudioRegistry';
+import {
+  createLessonSteps,
+  createMistakeStep,
+  getCorrectCutsceneStep,
+  getPracticeSteps,
+  normaliseStepAnswer,
+  shouldShowCutsceneAfterStep,
+} from '../lessonEngine/buildLessonSteps';
+import { colors, fonts, radius, shadows, spacing, type, ui } from '../theme';
 
 const getMarginLeft = (index) => {
   const cycle = index % 8;
@@ -52,32 +65,217 @@ function wordsFromAnswer(answer) {
     .filter(Boolean);
 }
 
-function createLessonExercises(lesson) {
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function choiceSet(answer, alternatives) {
+  return shuffle(uniqueValues([answer, ...alternatives]).slice(0, 3));
+}
+
+function wordBank(answer, alternatives) {
+  const answerWords = wordsFromAnswer(answer);
+  const answerKeys = answerWords.map((word) => word.toLowerCase());
+  const extras = alternatives
+    .flatMap(wordsFromAnswer)
+    .filter((word) => !answerKeys.includes(word.toLowerCase()));
+  return shuffle([...answerWords, ...uniqueValues(extras).slice(0, Math.max(2, 7 - answerWords.length))]);
+}
+
+function createTeachingItems(lesson, phrasePool = []) {
   if (!lesson) return [];
 
-  const quizAnswer = lesson.quiz?.answer || lesson.meaning;
-  const answerWords = wordsFromAnswer(lesson.meaning);
-  const extras = ['please', 'soon', 'friend', 'today', 'good', 'hello'].filter(
-    (word) => !answerWords.map((item) => item.toLowerCase()).includes(word)
-  );
+  const usablePool = phrasePool.filter((item) => item.type !== 'chest' && item.phrase && item.meaning);
+  const sourcePool = usablePool.length ? usablePool : [lesson];
+  const startIndex = Math.max(0, sourcePool.findIndex((item) => item.id === lesson.id));
+
+  return [0, 1, 2]
+    .map((offset) => sourcePool[(startIndex + offset) % sourcePool.length])
+    .filter(Boolean);
+}
+
+const languageCultureFacts = {
+  patois: [
+    'Jamaican Patois grew from contact between English and West African languages, then kept changing through everyday Jamaican life.',
+    'Jamaica has given the world reggae, dancehall, sprinting legends, bold food culture and everyday phrases people recognise far beyond the island.',
+    'In casual Jamaican speech, greetings can carry warmth, respect and relationship. Tone matters as much as the words.',
+  ],
+  swahili: [
+    'Swahili is spoken across East Africa and carries influences from African languages, Arabic and Indian Ocean trade.',
+    'A greeting can be more than hello in Swahili. It often opens a polite social exchange.',
+  ],
+  igbo: [
+    'Igbo is a major language of southeastern Nigeria, with many dialects and strong oral storytelling traditions.',
+    'In Igbo culture, greetings can show respect, age awareness and community connection.',
+  ],
+  wolof: [
+    'Wolof is widely spoken in Senegal and The Gambia, and greetings are an important part of everyday politeness.',
+    'A Wolof greeting can turn into a short conversation because checking on people matters.',
+  ],
+  haitian: [
+    'Haitian Creole is a full language with French influence and deep African language roots.',
+    'Haitian Creole carries history, identity and everyday creativity in the way people speak.',
+  ],
+  belizean: [
+    'Belizean Creole reflects Belize history, Caribbean culture and contact between many communities.',
+    'Belize is multilingual, so many speakers move naturally between Creole, English and other languages.',
+  ],
+  aave: [
+    'AAVE has its own grammar, sound patterns and history. It is not broken English.',
+    'AAVE has shaped music, comedy, internet language and global pop culture in powerful ways.',
+  ],
+};
+
+function pronunciationFromNote(note) {
+  if (!note) return '';
+  return note.replace(/^Pronounced:\s*/i, '').trim();
+}
+
+function getCultureFact(languageId, index) {
+  const facts = languageCultureFacts[languageId] || [
+    'Every language carries culture, history and identity. Learning the phrase also means learning the people behind it.',
+  ];
+  return facts[index % facts.length];
+}
+
+function createLessonCutscene(lesson, phrasePool = [], languageId, completedStep) {
+  const teachingItems = createTeachingItems(lesson, phrasePool);
+  const item = teachingItems[completedStep % Math.max(teachingItems.length, 1)] || lesson;
+
+  if (completedStep === 0) {
+    return {
+      variant: 'fact',
+      title: 'Did you know?',
+      body: getCultureFact(languageId, completedStep),
+    };
+  }
+
+  if (completedStep === 1 && item) {
+    return {
+      variant: 'vocab',
+      eyebrow: 'Phrase check',
+      phrase: item.phrase,
+      pronunciation: pronunciationFromNote(item.note) || 'Listen and repeat',
+      body: `${item.phrase} means "${item.meaning}". Try saying it once before the next challenge.`,
+      audioKey: item.audioKey,
+    };
+  }
+
+  if (completedStep === 3) {
+    return {
+      variant: 'coach',
+      eyebrow: 'Tutor tip',
+      title: 'You are building real recall.',
+      body: 'First you recognise the phrase. Then you build it yourself. That is how it starts to stick.',
+    };
+  }
+
+  return {
+    variant: 'fact',
+    title: 'Culture note',
+    body: getCultureFact(languageId, completedStep),
+  };
+}
+
+function createMistakeCutscene(exercise, selectedAnswerValue) {
+  if (exercise?.type === 'build') {
+    return {
+      variant: 'coach',
+      eyebrow: 'Mistake clinic',
+      title: 'Let us rebuild it together.',
+      body: `Your answer was "${selectedAnswerValue}". The stronger answer is "${exercise.answer}". Word order matters here, so try reading it once before moving on.`,
+    };
+  }
+
+  if (exercise?.id === 'listen-choice') {
+    return {
+      variant: 'fact',
+      title: 'Listening tip',
+      body: `If you cannot listen right now, use the small arrow under the speaker to reveal the phrase. The correct answer is "${exercise.answer}".`,
+    };
+  }
+
+  return {
+    variant: 'coach',
+    eyebrow: 'Tutor correction',
+    title: 'Good miss. Now you know.',
+    body: `You chose "${selectedAnswerValue}". The correct answer is "${exercise.answer}". Mistakes help your brain notice the difference next time.`,
+  };
+}
+
+function createLessonExercises(lesson, phrasePool = []) {
+  if (!lesson) return [];
+
+  const usablePool = phrasePool.filter((item) => item.type !== 'chest' && item.phrase && item.meaning);
+  const sourcePool = usablePool.length ? usablePool : [lesson];
+  const startIndex = Math.max(0, sourcePool.findIndex((item) => item.id === lesson.id));
+  const pick = (offset) => sourcePool[(startIndex + offset) % sourcePool.length];
+  const meanings = sourcePool.map((item) => item.meaning);
+  const phrases = sourcePool.map((item) => item.phrase);
+  const first = pick(0);
+  const second = pick(1);
+  const third = pick(2);
+  const fourth = pick(3);
 
   return [
     {
-      id: 'choice',
+      id: 'meaning-choice',
       type: 'choice',
-      title: `What does "${lesson.phrase}" mean?`,
-      prompt: lesson.phrase,
-      phrase: lesson.phrase,
-      answer: quizAnswer,
-      choices: lesson.quiz?.choices || shuffle([quizAnswer, 'Goodbye', 'Thank you']),
+      title: 'Choose the correct meaning',
+      prompt: first.phrase,
+      answer: first.meaning,
+      choices: choiceSet(first.meaning, meanings.filter((value) => value !== first.meaning)),
+      audioKey: first.audioKey,
+      note: first.note,
     },
     {
-      id: 'build',
+      id: 'reverse-choice',
+      type: 'choice',
+      title: `How do you say “${second.meaning}”?`,
+      prompt: second.meaning,
+      answer: second.phrase,
+      choices: choiceSet(second.phrase, phrases.filter((value) => value !== second.phrase)),
+      note: second.note,
+    },
+    {
+      id: 'listen-choice',
+      type: 'choice',
+      title: 'Listen and choose the meaning',
+      prompt: 'Tap the speaker to hear the phrase',
+      answer: third.meaning,
+      choices: choiceSet(third.meaning, meanings.filter((value) => value !== third.meaning)),
+      audioKey: third.audioKey,
+      audioLabel: 'Play the phrase',
+      note: third.note,
+    },
+    {
+      id: 'build-meaning',
       type: 'build',
-      title: `Build the meaning of "${lesson.phrase}"`,
-      prompt: lesson.phrase,
-      answer: lesson.meaning,
-      wordBank: shuffle([...answerWords, ...extras.slice(0, Math.max(2, 6 - answerWords.length))]),
+      title: 'Build the English meaning',
+      prompt: fourth.phrase,
+      answer: fourth.meaning,
+      wordBank: wordBank(fourth.meaning, meanings),
+      audioKey: fourth.audioKey,
+      note: fourth.note,
+    },
+    {
+      id: 'build-phrase',
+      type: 'build',
+      title: 'Build the Patois phrase',
+      prompt: first.meaning,
+      answer: first.phrase,
+      wordBank: wordBank(first.phrase, phrases),
+      note: first.note,
+    },
+    {
+      id: 'final-challenge',
+      type: 'choice',
+      title: 'Final challenge',
+      prompt: second.phrase,
+      answer: second.meaning,
+      choices: choiceSet(second.meaning, meanings.filter((value) => value !== second.meaning)),
+      audioKey: second.audioKey,
+      note: second.note,
     },
   ];
 }
@@ -117,46 +315,271 @@ function PathNode({ node, index, isCompleted, isActive, isLocked, themeColor, ac
   );
 }
 
-function LessonPlayer({ lesson, hearts, maxHearts, onExit, onMistake, onComplete }) {
-  const exercises = useMemo(() => createLessonExercises(lesson), [lesson]);
+function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNextLesson, onExit, onMistake, onComplete }) {
+  const lessonSteps = useMemo(() => createLessonSteps(lesson, phrasePool, courseId), [lesson, phrasePool, courseId]);
+  const practiceSteps = useMemo(() => getPracticeSteps(lessonSteps), [lessonSteps]);
+  const introStep = lessonSteps.find((item) => item.id === 'lesson-intro');
+  const sessionStartedAtRef = useRef(Date.now());
   const correctSound = useAudioPlayer(require('../../assets/sounds/correct.mp3'));
   const wrongSound = useAudioPlayer(require('../../assets/sounds/wrong.mp3'));
+  const [lessonStage, setLessonStage] = useState('teaching');
   const [step, setStep] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [builtWords, setBuiltWords] = useState([]);
   const [feedback, setFeedback] = useState(null);
+  const [attempts, setAttempts] = useState([]);
+  const [activeCutscene, setActiveCutscene] = useState(null);
+  const [audioHelperText, setAudioHelperText] = useState(null);
+  const [sessionComplete, setSessionComplete] = useState(false);
+  const advanceTimerRef = useRef(null);
 
-  const exercise = exercises[step];
-  const progress = (step + (feedback?.correct ? 1 : 0)) / exercises.length;
+  const exercise = practiceSteps[step];
+  const lessonAudioSource = getLessonAudioSource(courseId, exercise?.audioKey);
+  const lessonProgressUnits = practiceSteps.length + 1;
+  const reviewItems = introStep?.items || [];
+  const progress = sessionComplete ? 1 : lessonStage === 'review'
+    ? 0.95
+    : lessonStage === 'teaching'
+    ? 1 / lessonProgressUnits
+    : lessonStage === 'cutscene'
+      ? (step + 2) / lessonProgressUnits
+    : (step + 1 + (feedback?.correct ? 1 : 0)) / lessonProgressUnits;
+
+  useEffect(() => () => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+  }, []);
 
   function selectedAnswer() {
-    if (exercise.type === 'choice') return selectedChoice;
+    if (exercise?.choices) return selectedChoice;
     return builtWords.join(' ');
   }
 
   function canCheck() {
-    return exercise.type === 'choice' ? Boolean(selectedChoice) : builtWords.length > 0;
+    return exercise?.choices ? Boolean(selectedChoice) : builtWords.length > 0;
+  }
+
+  function playFeedbackSound(soundPlayer) {
+    try {
+      const seekResult = soundPlayer.seekTo(0);
+      if (seekResult?.then) {
+        seekResult.then(() => soundPlayer.play()).catch(() => {});
+        return;
+      }
+      soundPlayer.play();
+    } catch {
+      // Feedback sound should never interrupt the lesson flow.
+    }
   }
 
   function checkAnswer() {
     const answer = selectedAnswer();
-    const correct = normaliseAnswer(answer) === normaliseAnswer(exercise.answer);
-    const feedbackSound = correct ? correctSound : wrongSound;
-    feedbackSound.seekTo(0).then(() => feedbackSound.play());
+    const correct = normaliseStepAnswer(answer) === normaliseStepAnswer(exercise.answer);
+    const attempt = {
+      stepIndex: step,
+      stepId: exercise.id,
+      type: exercise.type,
+      prompt: exercise.prompt,
+      answer,
+      correctAnswer: exercise.answer,
+      correct,
+      answeredAt: Date.now(),
+    };
+    setAttempts((current) => [...current, attempt]);
+    playFeedbackSound(correct ? correctSound : wrongSound);
     Vibration.vibrate(correct ? 35 : [0, 80, 70, 120]);
-    if (!correct) onMistake();
+    if (!correct) {
+      onMistake({
+        lessonId: lesson.id,
+        stepId: exercise.id,
+        prompt: exercise.prompt,
+        answer,
+        correctAnswer: exercise.answer,
+        occurredAt: Date.now(),
+      });
+    }
     setFeedback({ correct, answer });
+    if (correct) {
+      advanceTimerRef.current = setTimeout(showCutsceneOrAdvance, 650);
+    }
   }
 
-  function continueLesson() {
-    if (step === exercises.length - 1) {
-      onComplete();
+  function createSessionSummary() {
+    const completedAt = Date.now();
+    const correctCount = attempts.filter((attempt) => attempt.correct).length;
+    const teachingItems = (introStep?.items || []).map((item) => ({
+      id: item.id || null,
+      phrase: item.phrase || null,
+      meaning: item.meaning || null,
+      audioKey: item.audioKey || null,
+    }));
+
+    return {
+      languageId: courseId,
+      lessonId: lesson.id,
+      lessonTitle: lesson.title || lesson.meaning || null,
+      unitId: lesson.unitId || null,
+      unitTitle: lesson.unitTitle || null,
+      startedAt: sessionStartedAtRef.current,
+      completedAt,
+      durationMs: completedAt - sessionStartedAtRef.current,
+      totalQuestions: practiceSteps.length,
+      correctCount,
+      mistakeCount: Math.max(attempts.length - correctCount, 0),
+      attempts,
+      teachingItems,
+    };
+  }
+
+  function advanceLessonStep() {
+    if (step === practiceSteps.length - 1) {
+      setLessonStage('review');
+      setFeedback(null);
       return;
     }
     setStep((current) => current + 1);
     setSelectedChoice(null);
     setBuiltWords([]);
     setFeedback(null);
+    setAudioHelperText(null);
+  }
+
+  function showMistakeCutsceneOrAdvance() {
+    setActiveCutscene(createMistakeStep(exercise, feedback?.answer || selectedAnswer()));
+    setFeedback(null);
+    setLessonStage('cutscene');
+  }
+
+  function showCutsceneOrAdvance() {
+    if (shouldShowCutsceneAfterStep(step, practiceSteps)) {
+      setActiveCutscene(getCorrectCutsceneStep(lesson, phrasePool, courseId, step));
+      setFeedback(null);
+      setLessonStage('cutscene');
+      return;
+    }
+    advanceLessonStep();
+  }
+
+  function continueFromCutscene() {
+    setLessonStage('practice');
+    setActiveCutscene(null);
+    setAudioHelperText(null);
+    advanceLessonStep();
+  }
+
+  if (lessonStage === 'teaching') {
+    return (
+      <SafeAreaView style={styles.lessonSafeArea}>
+        <StatusBar style="light" />
+        <TeachingSlide
+          languageId={courseId}
+          topic={introStep?.topic || lesson?.title || lesson?.meaning}
+          items={introStep?.items || []}
+          progress={progress}
+          onExit={onExit}
+          onContinue={() => setLessonStage('practice')}
+          getAudioSource={(item) => getLessonAudioSource(courseId, item?.audioKey)}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (lessonStage === 'cutscene') {
+    return (
+      <SafeAreaView style={styles.lessonSafeArea}>
+        <StatusBar style="light" />
+        <LessonCutscene
+          languageId={courseId}
+          cutscene={activeCutscene}
+          progress={progress}
+          onExit={onExit}
+          onContinue={continueFromCutscene}
+          audioSource={getLessonAudioSource(courseId, activeCutscene?.audioKey)}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (lessonStage === 'review' && !sessionComplete) {
+    return (
+      <SafeAreaView style={styles.lessonSafeArea}>
+        <StatusBar style="light" />
+        <View style={styles.lessonTopBar}>
+          <Pressable
+            accessibilityLabel="Exit lesson"
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={onExit}
+            style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
+          >
+            <Text style={styles.closeButtonText}>Ã—</Text>
+          </Pressable>
+          <View style={styles.lessonProgressTrack}>
+            <View style={[styles.lessonProgressFill, { width: `${Math.max(progress * 100, 12)}%` }]} />
+          </View>
+          <HeartsBar hearts={hearts} maxHearts={maxHearts} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.lessonReviewScreen}>
+          <Text style={styles.lessonReviewEyebrow}>QUICK REVIEW</Text>
+          <Text style={styles.lessonReviewTitle}>Lock these phrases in.</Text>
+          <Text style={styles.lessonReviewBody}>
+            Read them once, replay the audio if you want, then claim your reward.
+          </Text>
+
+          <View style={styles.lessonReviewList}>
+            {reviewItems.map((item, index) => (
+              <VocabularyCard
+                key={`${item.id || item.phrase}-${index}`}
+                item={item}
+                index={index}
+                audioSource={getLessonAudioSource(courseId, item?.audioKey)}
+              />
+            ))}
+          </View>
+        </ScrollView>
+
+        <View style={styles.lessonFooter}>
+          <PrimaryButton
+            label="CLAIM REWARD"
+            onPress={() => setSessionComplete(true)}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (sessionComplete) {
+    return (
+      <SafeAreaView style={styles.lessonSafeArea}>
+        <StatusBar style="light" />
+        <View style={styles.lessonCompleteScreen}>
+          <Text style={styles.lessonCompleteBadge}>✓</Text>
+          <Text style={styles.lessonCompleteEyebrow}>LESSON COMPLETE</Text>
+          <Text style={styles.lessonCompleteTitle}>You earned this one.</Text>
+          <Text style={styles.lessonCompleteBody}>
+            {attempts.some((attempt) => !attempt.correct)
+              ? 'You finished the lesson and turned mistakes into progress. That is real learning.'
+              : 'Clean run. Keep the rhythm going while the phrases are fresh.'}
+          </Text>
+          <View style={styles.lessonCompleteReward}>
+            <Text style={styles.lessonCompleteRewardValue}>+{lesson.xp || 10} XP</Text>
+            <Text style={styles.lessonCompleteRewardLabel}>Lesson reward</Text>
+          </View>
+          <View style={styles.lessonCompleteStats}>
+            <Text style={styles.lessonCompleteStat}>
+              {attempts.filter((attempt) => attempt.correct).length}/{practiceSteps.length} correct
+            </Text>
+            <Text style={styles.lessonCompleteStat}>
+              {Math.max(attempts.filter((attempt) => !attempt.correct).length, 0)} mistakes saved
+            </Text>
+          </View>
+          <PrimaryButton
+            label={hasNextLesson ? 'CONTINUE TO NEXT LESSON' : 'BACK TO THE PATH'}
+            onPress={() => onComplete(createSessionSummary())}
+          />
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -178,71 +601,19 @@ function LessonPlayer({ lesson, hearts, maxHearts, onExit, onMistake, onComplete
         <HeartsBar hearts={hearts} maxHearts={maxHearts} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.lessonContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.lessonTitle}>{exercise.title}</Text>
-        <View style={styles.lessonPromptRow}>
-          <MascotHero />
-          <View style={styles.speechCard}>
-            <Text style={styles.soundIcon}>🔊</Text>
-            <View style={styles.speechTextWrap}>
-              <Text style={styles.phraseText}>{exercise.prompt}</Text>
-              <Text style={styles.phraseHint}>{lesson.note}</Text>
-            </View>
-          </View>
-        </View>
-
-        {exercise.type === 'choice' ? (
-          <View style={styles.choiceList}>
-            {exercise.choices.map((choice) => {
-              const selected = selectedChoice === choice;
-              return (
-                <Pressable
-                  key={choice}
-                  disabled={Boolean(feedback)}
-                  onPress={() => setSelectedChoice(choice)}
-                  style={[styles.answerCard, selected && styles.answerCardSelected]}
-                >
-                  <Text style={styles.answerCardText}>{choice}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : (
-          <View style={styles.buildArea}>
-            <View style={styles.answerTray}>
-              {builtWords.length === 0 ? (
-                <Text style={styles.answerPlaceholder}>Tap words to build your answer</Text>
-              ) : (
-                builtWords.map((word, index) => (
-                  <Pressable
-                    key={`${word}-${index}`}
-                    disabled={Boolean(feedback)}
-                    onPress={() => setBuiltWords((words) => words.filter((_, itemIndex) => itemIndex !== index))}
-                    style={styles.wordChipSelected}
-                  >
-                    <Text style={styles.wordChipText}>{word}</Text>
-                  </Pressable>
-                ))
-              )}
-            </View>
-            <View style={styles.wordBank}>
-              {exercise.wordBank.map((word, index) => {
-                const used = builtWords.includes(word);
-                return (
-                  <Pressable
-                    key={`${word}-${index}`}
-                    disabled={used || Boolean(feedback)}
-                    onPress={() => setBuiltWords((words) => [...words, word])}
-                    style={[styles.wordChip, used && styles.wordChipUsed]}
-                  >
-                    <Text style={styles.wordChipText}>{word}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        )}
-      </ScrollView>
+      <LessonStepRenderer
+        step={exercise}
+        styles={styles}
+        selectedChoice={selectedChoice}
+        setSelectedChoice={setSelectedChoice}
+        builtWords={builtWords}
+        setBuiltWords={setBuiltWords}
+        feedback={feedback}
+        audioHelperText={audioHelperText}
+        normaliseAnswer={normaliseStepAnswer}
+        lessonAudioSource={lessonAudioSource}
+        onAudioFallbackPress={(text) => setAudioHelperText((current) => current === text ? null : text)}
+      />
 
       <View
         style={[
@@ -257,14 +628,17 @@ function LessonPlayer({ lesson, hearts, maxHearts, onExit, onMistake, onComplete
               {feedback.correct ? 'Correct!' : 'Incorrect'}
             </Text>
             <Text style={styles.feedbackBody}>
-              {feedback.correct ? '+10 XP — keep going.' : `Correct answer: ${exercise.answer}`}
+              {feedback.correct ? '+10 XP — next challenge.' : `Correct answer: ${exercise.answer}`}
             </Text>
+            {!feedback.correct && exercise.note ? (
+              <Text style={styles.feedbackHint}>{exercise.note}</Text>
+            ) : null}
           </View>
         ) : null}
         <PrimaryButton
-          label={feedback ? 'GOT IT' : 'CHECK'}
-          disabled={!feedback && !canCheck()}
-          onPress={feedback ? continueLesson : checkAnswer}
+          label={feedback?.correct ? 'NICE!' : feedback ? 'GOT IT' : 'CHECK'}
+          disabled={Boolean(feedback?.correct) || (!feedback && !canCheck())}
+          onPress={feedback ? showMistakeCutsceneOrAdvance : checkAnswer}
         />
       </View>
     </SafeAreaView>
@@ -272,11 +646,19 @@ function LessonPlayer({ lesson, hearts, maxHearts, onExit, onMistake, onComplete
 }
 
 export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }) {
-  const { profile, syncProgress, isAuthenticated } = useAuth();
+  const {
+    profile,
+    syncProgress,
+    isAuthenticated,
+    loadLanguageProgress,
+    recordLessonSession,
+    syncLanguageProgress,
+  } = useAuth();
   const {
     hearts,
     maxHearts,
     hasHearts,
+    timeUntilNextHeartMs,
     showOutOfHearts,
     loseHeart,
     refillHearts,
@@ -291,13 +673,45 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
   const [selectedNode, setSelectedNode] = useState(null);
   const [activeLesson, setActiveLesson] = useState(null);
   const [purchasedItems, setPurchasedItems] = useState([]);
+  const [languageProgress, setLanguageProgress] = useState(null);
+  const [isProgressReady, setIsProgressReady] = useState(false);
 
   useEffect(() => {
     if (profile) {
       setXp(profile.xp ?? 0);
       setStreak(profile.streak ?? 0);
+      setGems(profile.gems ?? 100);
+      setPurchasedItems(profile.purchasedItems || []);
     }
-  }, [profile?.xp, profile?.streak]);
+  }, [profile?.xp, profile?.streak, profile?.gems, profile?.purchasedItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateProgress() {
+      setIsProgressReady(false);
+
+      if (!isAuthenticated) {
+        setCompleted([]);
+        setLanguageProgress(null);
+        setIsProgressReady(true);
+        return;
+      }
+
+      const progress = await loadLanguageProgress(courseId);
+      if (cancelled) return;
+
+      setLanguageProgress(progress);
+      setCompleted(progress?.completedLessons || []);
+      setIsProgressReady(true);
+    }
+
+    hydrateProgress();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, isAuthenticated, loadLanguageProgress]);
 
   const course = useMemo(() => {
     const selectedCourse = getCourseById(courseId);
@@ -314,6 +728,16 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     () => lessons.filter((lesson) => lesson.type !== 'chest'),
     [lessons]
   );
+  const activeLessonPool = useMemo(() => {
+    if (!activeLesson) return [];
+    const unit = course.units.find((item) => item.lessons.some((lesson) => lesson.id === activeLesson.id));
+    return unit?.lessons.filter((lesson) => lesson.type !== 'chest') || [];
+  }, [activeLesson, course.units]);
+  const nextLesson = useMemo(() => {
+    if (!activeLesson) return null;
+    const currentIndex = playableLessons.findIndex((lesson) => lesson.id === activeLesson.id);
+    return currentIndex >= 0 ? playableLessons[currentIndex + 1] || null : null;
+  }, [activeLesson, playableLessons]);
 
   const activeNodeId = useMemo(() => {
     const next = lessons.find((lesson, index) => {
@@ -324,6 +748,11 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
   }, [completed, lessons]);
 
   function handleNodePress(node, index) {
+    if (!isProgressReady) {
+      Alert.alert('Loading progress', 'Give us a second to load your saved path.');
+      return;
+    }
+
     const isLocked = index > 0 && !completed.includes(lessons[index - 1].id);
     if (isLocked) {
       Alert.alert('Lesson locked', 'Finish the previous step first to unlock this lesson.');
@@ -335,9 +764,28 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
         Alert.alert('Already opened', 'You claimed this reward already.');
         return;
       }
-      setGems((current) => current + 25);
-      setXp((current) => current + node.xp);
-      setCompleted((current) => [...current, node.id]);
+      const nextCompleted = [...completed, node.id];
+      const nextOpenedChests = [...(languageProgress?.openedChests || []), node.id];
+      const nextXp = xp + node.xp;
+      const nextGems = gems + 25;
+
+      setGems(nextGems);
+      setXp(nextXp);
+      setCompleted(nextCompleted);
+      setLanguageProgress((current) => current ? {
+        ...current,
+        completedLessons: nextCompleted,
+        openedChests: nextOpenedChests,
+      } : current);
+      if (isAuthenticated) {
+        syncProgress({ xp: nextXp, gems: nextGems });
+        syncLanguageProgress(courseId, {
+          completedLessons: nextCompleted,
+          openedChests: nextOpenedChests,
+          currentLesson: activeNodeId,
+          lastPlayedAt: Date.now(),
+        });
+      }
       Alert.alert('Chest opened! 🎁', `You earned ${node.xp} XP and 25 gems.`);
       return;
     }
@@ -354,28 +802,83 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     setSelectedNode(null);
   }
 
-  function completeLesson() {
-    if (activeLesson && !completed.includes(activeLesson.id)) {
+  async function completeLesson(sessionSummary) {
+    if (!activeLesson) {
+      return;
+    }
+
+    const wasFirstCompletion = !completed.includes(activeLesson.id);
+    const xpEarned = wasFirstCompletion ? activeLesson.xp : 0;
+    const gemsEarned = wasFirstCompletion ? 5 : 0;
+
+    if (isAuthenticated) {
+      recordLessonSession({
+        ...sessionSummary,
+        xpEarned,
+        gemsEarned,
+        wasFirstCompletion,
+        nextLessonId: nextLesson?.id || null,
+      }).catch(() => {});
+    }
+
+    if (wasFirstCompletion) {
       const nextXp = xp + activeLesson.xp;
       const nextStreak = completed.length === 0 ? streak + 1 : streak;
+      const nextGems = gems + 5;
+      const nextCompleted = [...completed, activeLesson.id];
 
-      setCompleted((current) => [...current, activeLesson.id]);
+      setCompleted(nextCompleted);
       setXp(nextXp);
-      setGems((current) => current + 5);
+      setGems(nextGems);
       if (completed.length === 0) {
         setStreak(nextStreak);
       }
+      setLanguageProgress((current) => current ? {
+        ...current,
+        completedLessons: nextCompleted,
+        currentLesson: nextLesson?.id || activeLesson.id,
+        lastPlayedAt: Date.now(),
+      } : current);
 
       if (isAuthenticated) {
         syncProgress({
           xp: nextXp,
           streak: nextStreak,
+          gems: nextGems,
           currentCourse: courseId,
           currentLesson: activeLesson.id,
         });
+        syncLanguageProgress(courseId, {
+          completedLessons: nextCompleted,
+          currentLesson: nextLesson?.id || activeLesson.id,
+          lastPlayedAt: Date.now(),
+        });
       }
     }
-    setActiveLesson(null);
+    setActiveLesson(nextLesson);
+  }
+
+  function handleMistake(mistake) {
+    loseHeart();
+
+    const nextMistakes = [
+      ...(languageProgress?.mistakes || []),
+      mistake,
+    ].slice(-50);
+
+    setLanguageProgress((current) => current ? {
+      ...current,
+      mistakes: nextMistakes,
+      lastPlayedAt: Date.now(),
+    } : current);
+
+    if (isAuthenticated) {
+      syncLanguageProgress(courseId, {
+        mistakes: nextMistakes,
+        currentLesson: activeLesson?.id || null,
+        lastPlayedAt: Date.now(),
+      });
+    }
   }
 
   function buyItem(itemId, cost) {
@@ -384,8 +887,17 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
       return;
     }
 
-    setGems((current) => current - cost);
-    setPurchasedItems((current) => [...current, itemId]);
+    const nextGems = gems - cost;
+    const nextPurchasedItems = [...purchasedItems, itemId];
+
+    setGems(nextGems);
+    setPurchasedItems(nextPurchasedItems);
+    if (isAuthenticated) {
+      syncProgress({
+        gems: nextGems,
+        purchasedItems: nextPurchasedItems,
+      });
+    }
     if (itemId === 'refill') {
       refillHearts();
       Alert.alert('Hearts refilled!', 'You are ready for more lessons.');
@@ -397,11 +909,15 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
   if (activeLesson) {
     return (
       <LessonPlayer
+        key={activeLesson.id}
         lesson={activeLesson}
+        phrasePool={activeLessonPool}
+        courseId={courseId}
         hearts={hearts}
         maxHearts={maxHearts}
+        hasNextLesson={Boolean(nextLesson)}
         onExit={() => setActiveLesson(null)}
-        onMistake={loseHeart}
+        onMistake={handleMistake}
         onComplete={completeLesson}
       />
     );
@@ -412,16 +928,16 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
       <StatusBar style="light" />
       <View style={styles.topBar}>
         <Pressable onPress={onBack} style={styles.courseSelectButton}>
-          <Text style={styles.courseFlag}>{course.flag}</Text>
-          <Text style={styles.courseChevron}>⌄</Text>
+          <Text style={styles.courseFlag}>D</Text>
+          <Text style={styles.courseChevron}>v</Text>
         </Pressable>
         <View style={styles.statsContainer}>
           <View style={styles.statPill}>
-            <Text style={styles.statIcon}>🔥</Text>
+            <Text style={styles.statIcon}>S</Text>
             <Text style={styles.statText}>{streak}</Text>
           </View>
           <View style={styles.statPill}>
-            <Text style={styles.statIcon}>💎</Text>
+            <Text style={styles.statIcon}>G</Text>
             <Text style={styles.statText}>{gems}</Text>
           </View>
           <HeartsBar hearts={hearts} maxHearts={maxHearts} />
@@ -453,7 +969,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
                       <Text style={styles.unitSubcopy}>{unit.goal}</Text>
                     </View>
                     <View style={styles.unitBook}>
-                      <Text style={styles.unitBookIcon}>📚</Text>
+                      <Text style={styles.unitBookIcon}>D</Text>
                     </View>
                   </LinearGradient>
 
@@ -508,7 +1024,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
         {activeTab === 'shop' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-            <Text style={styles.tabTitle}>Shop 💎</Text>
+            <Text style={styles.tabTitle}>Shop</Text>
             <Text style={styles.tabSubtitle}>Use gems for boosts that keep lessons moving.</Text>
             <ShopItem emoji="❤️" title="Refill Hearts" detail="Restore all 5 hearts instantly." action="150 💎" onPress={() => buyItem('refill', 150)} />
             <ShopItem
@@ -532,7 +1048,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
         {activeTab === 'leaderboard' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-            <Text style={styles.tabTitle}>Leagues 🏆</Text>
+            <Text style={styles.tabTitle}>Leagues</Text>
             <Text style={styles.tabSubtitle}>Climb by finishing lessons and keeping your streak alive.</Text>
             {[
               ['🥇', 'Aisha S.', '1,450 XP'],
@@ -541,7 +1057,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
               ['4', 'You', `${xp} XP`],
             ].map(([rank, name, score]) => (
               <View key={name} style={[styles.leaderRow, name === 'You' && styles.leaderRowUser]}>
-                <Text style={styles.leaderRank}>{rank}</Text>
+                <Text style={styles.leaderRank}>{safeLeaderRank(rank, name)}</Text>
                 <Text style={styles.leaderName}>{name}</Text>
                 <Text style={styles.leaderXp}>{score}</Text>
               </View>
@@ -553,7 +1069,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
             <View style={styles.profileHeader}>
               <View style={styles.avatarCircle}>
-                <Text style={styles.avatarEmoji}>🦉</Text>
+                <Text style={styles.avatarEmoji}>D</Text>
               </View>
               <Text style={styles.profileName}>Diaspora Scholar</Text>
               <Text style={styles.profileNative}>Native language: {userLanguage?.toUpperCase() || 'ENGLISH'}</Text>
@@ -569,7 +1085,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
         {activeTab === 'settings' ? (
           <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-            <Text style={styles.tabTitle}>Settings ⚙️</Text>
+            <Text style={styles.tabTitle}>Settings</Text>
             <Text style={styles.tabSubtitle}>Lesson-focused settings for the learning path.</Text>
             <SettingRow label="Sound effects" active />
             <SettingRow label="Daily reminders" active />
@@ -580,7 +1096,12 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
       <LessonPreview node={selectedNode} course={course} onClose={() => setSelectedNode(null)} onStart={startLesson} />
 
-      <OutOfHeartsModal visible={showOutOfHearts} onClose={closeOutOfHearts} onRefill={refillHearts} />
+      <OutOfHeartsModal
+        visible={showOutOfHearts}
+        onClose={closeOutOfHearts}
+        onRefill={refillHearts}
+        timeUntilNextHeartMs={timeUntilNextHeartMs}
+      />
 
       <View style={styles.bottomTabBar}>
         <TabButton icon="🏠" label="Path" active={activeTab === 'path'} color={course.themeColor} onPress={() => setActiveTab('path')} />
@@ -621,27 +1142,54 @@ function LessonPreview({ node, course, onClose, onStart }) {
 }
 
 function TabButton({ icon, label, active, color, onPress }) {
+  const safeIcons = {
+    Path: 'P',
+    Shop: 'S',
+    Leagues: 'L',
+    Profile: 'U',
+    Settings: 'C',
+  };
+
   return (
     <Pressable onPress={onPress} style={[styles.tabItem, active && styles.tabItemActive]}>
-      <Text style={styles.tabItemEmoji}>{icon}</Text>
+      <Text style={[styles.tabItemEmoji, active && { backgroundColor: color, borderColor: color }]}>
+        {safeIcons[label] || icon}
+      </Text>
       <Text style={[styles.tabItemText, active && { color }]}>{label}</Text>
     </Pressable>
   );
 }
 
 function ShopItem({ emoji, title, detail, action, disabled, onPress }) {
+  const safeIcons = {
+    'Refill Hearts': 'H',
+    'Streak Freeze': 'S',
+    'Mascot Hat': 'M',
+  };
+  const safeAction = action
+    .replace(/150.*/, '150 G')
+    .replace(/300.*/, '300 G')
+    .replace(/400.*/, '400 G');
+
   return (
     <View style={styles.shopItem}>
-      <Text style={styles.shopEmoji}>{emoji}</Text>
+      <Text style={styles.shopEmoji}>{safeIcons[title] || emoji}</Text>
       <View style={styles.shopCopy}>
         <Text style={styles.shopTitle}>{title}</Text>
         <Text style={styles.shopDetail}>{detail}</Text>
       </View>
       <Pressable disabled={disabled} onPress={onPress} style={[styles.buyButton, disabled && styles.buyButtonDisabled]}>
-        <Text style={styles.buyButtonText}>{action}</Text>
+        <Text style={styles.buyButtonText}>{safeAction}</Text>
       </Pressable>
     </View>
   );
+}
+
+function safeLeaderRank(rank, name) {
+  if (name === 'Aisha S.') return '1';
+  if (name === 'Kofi B.') return '2';
+  if (name === 'Marcus J.') return '3';
+  return rank;
 }
 
 function StatCard({ label, value }) {
@@ -671,26 +1219,27 @@ const styles = StyleSheet.create({
   },
   topBar: {
     alignItems: 'center',
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingHorizontal: ui.screenPadding,
+    paddingVertical: spacing.sm,
   },
   courseSelectButton: {
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    ...shadows.soft,
   },
   courseFlag: {
-    fontSize: 24,
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: type.body,
   },
   courseChevron: {
     color: colors.textMuted,
@@ -705,38 +1254,43 @@ const styles = StyleSheet.create({
   statPill: {
     alignItems: 'center',
     backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
     borderRadius: radius.pill,
     flexDirection: 'row',
     gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   statIcon: {
-    fontSize: 17,
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: type.caption,
   },
   statText: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 16,
+    fontSize: type.caption,
   },
   mainContainer: {
     flex: 1,
-    paddingBottom: 72,
+    paddingBottom: ui.bottomTabHeight,
   },
   pathContent: {
-    padding: spacing.md,
+    padding: ui.screenPadding,
     paddingBottom: 140,
   },
   unitSection: {
     marginBottom: spacing.xl,
   },
   unitHeaderCard: {
+    ...shadows.card,
     borderRadius: radius.xl,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 132,
+    minHeight: 118,
     overflow: 'hidden',
-    padding: spacing.lg,
+    padding: spacing.md,
   },
   unitCopy: {
     flex: 1,
@@ -744,51 +1298,50 @@ const styles = StyleSheet.create({
   unitEyebrow: {
     color: 'rgba(255,255,255,0.72)',
     fontFamily: fonts.black,
-    fontSize: 13,
+    fontSize: type.micro,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   unitTitle: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 27,
-    lineHeight: 34,
+    fontSize: type.title,
+    lineHeight: 30,
     marginTop: spacing.xs,
   },
   unitSubcopy: {
     color: 'rgba(255,255,255,0.75)',
-    fontFamily: fonts.semiBold,
-    fontSize: 13,
+    fontFamily: fonts.medium,
+    fontSize: type.caption,
     marginTop: spacing.sm,
   },
   unitBook: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.14)',
-    borderRadius: radius.xl,
-    height: 74,
+    borderRadius: radius.lg,
+    height: 58,
     justifyContent: 'center',
-    width: 74,
+    width: 58,
   },
   unitBookIcon: {
-    fontSize: 34,
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: type.heading,
   },
   progressCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    marginTop: spacing.md,
-    padding: spacing.md,
+    ...ui.card,
+    marginTop: spacing.sm,
+    padding: spacing.sm,
   },
   progressLabel: {
     color: colors.textMuted,
     fontFamily: fonts.bold,
-    fontSize: 13,
+    fontSize: type.caption,
   },
   progressValue: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 24,
+    fontSize: type.heading,
     marginTop: 2,
   },
   progressTrack: {
@@ -804,41 +1357,44 @@ const styles = StyleSheet.create({
   },
   pathMapContainer: {
     alignItems: 'center',
-    minHeight: 560,
-    paddingTop: spacing.xl,
+    minHeight: 520,
+    paddingTop: spacing.lg,
   },
   nodeRow: {
     alignItems: 'center',
-    height: 104,
+    height: 94,
     justifyContent: 'center',
     position: 'relative',
     width: 180,
   },
   pathLine: {
-    backgroundColor: colors.border,
-    height: 78,
+    backgroundColor: '#3A2B23',
+    borderRadius: radius.pill,
+    height: 72,
     position: 'absolute',
     top: -42,
-    width: 8,
+    width: 6,
   },
   nodeCircle: {
     alignItems: 'center',
     backgroundColor: colors.blue,
     borderBottomColor: 'rgba(0,0,0,0.25)',
-    borderBottomWidth: 6,
+    borderBottomWidth: 5,
     borderColor: '#167EAD',
-    borderRadius: 42,
-    borderWidth: 4,
-    height: 84,
+    borderRadius: 36,
+    borderWidth: 3,
+    height: 72,
     justifyContent: 'center',
-    width: 84,
+    width: 72,
     zIndex: 2,
+    ...shadows.soft,
   },
   nodeCompleted: {
     borderBottomColor: colors.primaryDark,
   },
   nodeActive: {
-    borderWidth: 5,
+    borderWidth: 4,
+    transform: [{ scale: 1.05 }],
   },
   nodeLocked: {
     backgroundColor: colors.locked,
@@ -856,7 +1412,7 @@ const styles = StyleSheet.create({
   nodeText: {
     color: colors.splash,
     fontFamily: fonts.black,
-    fontSize: 28,
+    fontSize: type.heading,
   },
   nodeTextCompleted: {
     color: colors.text,
@@ -865,11 +1421,11 @@ const styles = StyleSheet.create({
     fontSize: 32,
   },
   activeRing: {
-    borderRadius: 50,
-    borderWidth: 4,
-    height: 100,
+    borderRadius: 44,
+    borderWidth: 3,
+    height: 88,
     position: 'absolute',
-    width: 100,
+    width: 88,
   },
   mascotContainer: {
     position: 'absolute',
@@ -878,35 +1434,36 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.82 }],
   },
   tabContent: {
-    padding: spacing.lg,
+    padding: ui.screenPadding,
     paddingBottom: 120,
   },
   tabTitle: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 30,
+    fontSize: type.display,
   },
   tabSubtitle: {
     color: colors.textMuted,
-    fontFamily: fonts.semiBold,
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: spacing.lg,
+    fontFamily: fonts.medium,
+    fontSize: type.body,
+    lineHeight: 20,
+    marginBottom: spacing.md,
     marginTop: spacing.xs,
   },
   shopItem: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
+    ...ui.card,
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-    padding: spacing.md,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: ui.compactCardPadding,
   },
   shopEmoji: {
-    fontSize: 30,
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: type.heading,
+    textAlign: 'center',
+    width: 28,
   },
   shopCopy: {
     flex: 1,
@@ -914,19 +1471,19 @@ const styles = StyleSheet.create({
   shopTitle: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 17,
+    fontSize: type.body,
   },
   shopDetail: {
     color: colors.textMuted,
     fontFamily: fonts.medium,
-    fontSize: 13,
+    fontSize: type.caption,
     marginTop: 2,
   },
   buyButton: {
     backgroundColor: colors.blue,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   buyButtonDisabled: {
     backgroundColor: colors.locked,
@@ -934,18 +1491,15 @@ const styles = StyleSheet.create({
   buyButtonText: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 12,
+    fontSize: type.micro,
   },
   leaderRow: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
+    ...ui.card,
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-    padding: spacing.md,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: ui.compactCardPadding,
   },
   leaderRowUser: {
     borderColor: colors.primary,
@@ -953,46 +1507,47 @@ const styles = StyleSheet.create({
   leaderRank: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 24,
-    width: 40,
+    fontSize: type.body,
+    width: 28,
   },
   leaderName: {
     color: colors.text,
     flex: 1,
     fontFamily: fonts.black,
-    fontSize: 17,
+    fontSize: type.body,
   },
   leaderXp: {
     color: colors.accent,
     fontFamily: fonts.black,
-    fontSize: 15,
+    fontSize: type.caption,
   },
   profileHeader: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   avatarCircle: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 56,
-    borderWidth: 2,
-    height: 112,
+    ...ui.elevatedCard,
+    borderRadius: 48,
+    height: 96,
     justifyContent: 'center',
-    width: 112,
+    width: 96,
   },
   avatarEmoji: {
-    fontSize: 54,
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: 42,
   },
   profileName: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 24,
+    fontSize: type.heading,
     marginTop: spacing.md,
   },
   profileNative: {
     color: colors.textMuted,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
+    fontSize: type.caption,
     marginTop: spacing.xs,
   },
   statsGrid: {
@@ -1001,38 +1556,33 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   statCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
+    ...ui.card,
+    padding: ui.compactCardPadding,
     width: '47%',
   },
   statCardValue: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 22,
+    fontSize: type.heading,
   },
   statCardLabel: {
     color: colors.textMuted,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.medium,
+    fontSize: type.caption,
     marginTop: spacing.xs,
   },
   settingRow: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
+    ...ui.card,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
-    padding: spacing.md,
+    marginBottom: spacing.sm,
+    padding: ui.compactCardPadding,
   },
   settingName: {
     color: colors.text,
     fontFamily: fonts.black,
-    fontSize: 16,
+    fontSize: type.body,
   },
   switchTrack: {
     backgroundColor: colors.locked,
@@ -1143,7 +1693,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     bottom: 0,
     flexDirection: 'row',
-    height: 72,
+    height: ui.bottomTabHeight,
     left: 0,
     paddingBottom: spacing.sm,
     position: 'absolute',
@@ -1159,12 +1709,24 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   tabItemEmoji: {
-    fontSize: 22,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    color: colors.textMuted,
+    fontFamily: fonts.black,
+    fontSize: type.caption,
+    height: 26,
+    lineHeight: 24,
+    overflow: 'hidden',
+    textAlign: 'center',
+    width: 26,
   },
   tabItemText: {
     color: colors.textMuted,
     fontFamily: fonts.black,
-    fontSize: 10,
+    fontSize: type.micro,
     marginTop: 2,
   },
   lessonSafeArea: {
@@ -1221,8 +1783,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   lessonPromptRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
+    alignItems: 'stretch',
     gap: spacing.md,
   },
   speechCard: {
@@ -1237,7 +1798,19 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   soundIcon: {
-    fontSize: 28,
+    fontSize: 22,
+  },
+  audioButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(70, 180, 255, 0.12)',
+    borderRadius: 22,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  audioButtonPressed: {
+    opacity: 0.65,
+    transform: [{ scale: 0.94 }],
   },
   speechTextWrap: {
     flex: 1,
@@ -1255,9 +1828,87 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: spacing.xs,
   },
+  audioHelperCard: {
+    backgroundColor: 'rgba(28, 176, 246, 0.1)',
+    borderColor: 'rgba(28, 176, 246, 0.32)',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+  },
+  audioHelperTitle: {
+    color: colors.blue,
+    fontFamily: fonts.black,
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  audioHelperBody: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 20,
+    lineHeight: 28,
+    marginTop: spacing.xs,
+  },
   choiceList: {
     gap: spacing.md,
     marginTop: spacing.xxl,
+  },
+  revealCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderBottomWidth: 7,
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    marginTop: spacing.xxl,
+    minHeight: 280,
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  revealCardPressed: {
+    borderBottomWidth: 3,
+    transform: [{ translateY: 4 }],
+  },
+  revealLabel: {
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: 13,
+    letterSpacing: 1.4,
+  },
+  revealWord: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 38,
+    lineHeight: 48,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  revealAnswerWrap: {
+    alignItems: 'center',
+    borderTopColor: '#4A3529',
+    borderTopWidth: 1,
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+    width: '100%',
+  },
+  revealAnswer: {
+    color: colors.blue,
+    fontFamily: fonts.black,
+    fontSize: 26,
+    textAlign: 'center',
+  },
+  revealPronunciation: {
+    color: colors.textLight,
+    fontFamily: fonts.semiBold,
+    fontSize: 15,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  revealPrompt: {
+    color: colors.textLight,
+    fontFamily: fonts.semiBold,
+    fontSize: 16,
+    marginTop: spacing.lg,
   },
   answerCard: {
     alignItems: 'center',
@@ -1271,6 +1922,14 @@ const styles = StyleSheet.create({
   answerCardSelected: {
     backgroundColor: 'rgba(244, 185, 66, 0.14)',
     borderColor: colors.accent,
+  },
+  answerCardCorrect: {
+    backgroundColor: 'rgba(88, 204, 2, 0.18)',
+    borderColor: colors.primary,
+  },
+  answerCardWrong: {
+    backgroundColor: 'rgba(255, 92, 92, 0.16)',
+    borderColor: colors.error,
   },
   answerCardText: {
     color: colors.text,
@@ -1329,6 +1988,108 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 18,
   },
+  lessonReviewScreen: {
+    padding: spacing.lg,
+    paddingBottom: 140,
+    paddingTop: spacing.md,
+  },
+  lessonReviewEyebrow: {
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    marginTop: spacing.md,
+  },
+  lessonReviewTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 34,
+    lineHeight: 42,
+    marginTop: spacing.xs,
+  },
+  lessonReviewBody: {
+    color: colors.textMuted,
+    fontFamily: fonts.semiBold,
+    fontSize: 16,
+    lineHeight: 24,
+    marginTop: spacing.sm,
+  },
+  lessonReviewList: {
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  lessonCompleteScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  lessonCompleteBadge: {
+    alignSelf: 'center',
+    color: colors.primary,
+    fontFamily: fonts.black,
+    fontSize: 72,
+  },
+  lessonCompleteEyebrow: {
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: 13,
+    letterSpacing: 1.6,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  lessonCompleteTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 34,
+    lineHeight: 42,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  lessonCompleteBody: {
+    color: colors.textMuted,
+    fontFamily: fonts.semiBold,
+    fontSize: 16,
+    lineHeight: 24,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  lessonCompleteReward: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    marginVertical: spacing.xl,
+    padding: spacing.lg,
+  },
+  lessonCompleteRewardValue: {
+    color: colors.accent,
+    fontFamily: fonts.black,
+    fontSize: 30,
+  },
+  lessonCompleteRewardLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.bold,
+    marginTop: spacing.xs,
+  },
+  lessonCompleteStats: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  lessonCompleteStat: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    color: colors.textMuted,
+    fontFamily: fonts.bold,
+    fontSize: type.caption,
+    overflow: 'hidden',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
   lessonFooter: {
     backgroundColor: '#1E1612',
     borderTopColor: '#2E221B',
@@ -1361,5 +2122,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 16,
     marginTop: spacing.xs,
+  },
+  feedbackHint: {
+    color: colors.textMuted,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: spacing.sm,
   },
 });

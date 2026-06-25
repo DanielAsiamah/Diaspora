@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-06-24T18:02:51.594Z",
+  "source": "patois_learn_database_1.xlsx",
+  "files": [
+    {
+      "languageId": "patois",
+      "phrase": "likkle more",
+      "file": "patois/likkle_more.mp3"
+    },
+    {
+      "languageId": "patois",
+      "phrase": "mawnin",
+      "file": "patois/mawnin.mp3"
+    },
+    {
+      "languageId": "patois",
+      "phrase": "wah deh pon",
+      "file": "patois/wah_deh_pon.mp3"
+    },
+    {
+      "languageId": "patois",
+      "phrase": "wah gwaan",
+      "file": "patois/wah_gwaan.mp3"
+    },
+    {
+      "languageId": "patois",
+      "phrase": "wah gwaan bredda",
+      "file": "patois/wah_gwaan_bredda.mp3"
+    }
+  ]
+}
