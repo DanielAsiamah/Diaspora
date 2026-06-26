@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 
 import AnimatedAtmosphere from '../components/AnimatedAtmosphere';
-import { colors, fonts, radius, spacing } from '../theme';
+import MascotHero from '../components/MascotHero';
+import { colors, fonts, radius, shadows, spacing } from '../theme';
 
 const NATIVE_LANGUAGES = [
   {
@@ -37,13 +38,13 @@ const NATIVE_LANGUAGES = [
 
 export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
+  const slideAnim = useRef(new Animated.Value(18)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 500,
+        duration: 480,
         useNativeDriver: true,
       }),
       Animated.spring(slideAnim, {
@@ -53,14 +54,11 @@ export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   return (
     <View style={styles.root}>
-      <AnimatedAtmosphere
-        colors={[colors.splashGreen, colors.skyTop, colors.skyBottom]}
-        accent={colors.blue}
-      />
+      <AnimatedAtmosphere colors={['#F7FCF9', '#EEF8F4']} accent={colors.blue} />
 
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
@@ -78,9 +76,11 @@ export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
             { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
           ]}
         >
+          <MascotHero compact mood="thinking" />
+          <Text style={styles.eyebrow}>Personalize your lessons</Text>
           <Text style={styles.title}>What language do you speak?</Text>
           <Text style={styles.subtitle}>
-            Select your native language. We will customize your courses based on this.
+            Choose the language you want explanations and support in.
           </Text>
 
           <View style={styles.list}>
@@ -91,17 +91,17 @@ export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
                 style={({ pressed }) => [
                   styles.card,
                   pressed && styles.cardPressed,
-                  { borderBottomColor: lang.accentColor + '99' },
+                  { borderLeftColor: lang.accentColor },
                 ]}
               >
-                <View style={[styles.flagBadge, { backgroundColor: lang.accentColor + '20' }]}>
+                <View style={[styles.flagBadge, { backgroundColor: lang.accentColor + '18' }]}>
                   <Text style={styles.flagEmoji}>{lang.flag}</Text>
                 </View>
                 <View style={styles.cardInfo}>
                   <Text style={styles.cardLabel}>{lang.label}</Text>
                   <Text style={styles.cardSubtitle}>{lang.subtitle}</Text>
                 </View>
-                <Text style={styles.arrow}>➔</Text>
+                <Text style={styles.arrow}>→</Text>
               </Pressable>
             ))}
           </View>
@@ -113,8 +113,8 @@ export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
 
 const styles = StyleSheet.create({
   root: {
+    backgroundColor: '#F7FCF9',
     flex: 1,
-    backgroundColor: colors.skyBottom,
   },
   safeArea: {
     flex: 1,
@@ -132,12 +132,12 @@ const styles = StyleSheet.create({
     width: 40,
   },
   backText: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.black,
     fontSize: 24,
   },
   progressContainer: {
-    backgroundColor: colors.border,
+    backgroundColor: '#DCEAE4',
     borderRadius: radius.pill,
     flex: 1,
     height: 10,
@@ -152,22 +152,29 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  eyebrow: {
+    color: colors.primaryDark,
+    fontFamily: fonts.black,
+    fontSize: 12,
+    letterSpacing: 1,
+    marginTop: spacing.lg,
+    textTransform: 'uppercase',
   },
   title: {
-    color: colors.textDark,
+    color: '#102018',
     fontFamily: fonts.black,
-    fontSize: 28,
-    lineHeight: 34,
-    textAlign: 'left',
+    fontSize: 30,
+    lineHeight: 36,
+    marginTop: spacing.xs,
   },
   subtitle: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.semiBold,
     fontSize: 15,
     lineHeight: 22,
     marginTop: spacing.sm,
-    textAlign: 'left',
   },
   list: {
     gap: spacing.md,
@@ -175,18 +182,19 @@ const styles = StyleSheet.create({
   },
   card: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderBottomWidth: 4,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
+    borderLeftWidth: 5,
     borderRadius: radius.lg,
-    borderWidth: 2,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.md,
+    ...shadows.soft,
   },
   cardPressed: {
+    opacity: 0.78,
     transform: [{ translateY: 2 }],
-    borderBottomWidth: 2,
   },
   flagBadge: {
     alignItems: 'center',
@@ -202,20 +210,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardLabel: {
-    color: colors.textDark,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 18,
   },
   cardSubtitle: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.bold,
     fontSize: 12,
     marginTop: 2,
   },
   arrow: {
-    color: colors.border,
+    color: '#9AA9A1',
     fontFamily: fonts.black,
-    fontSize: 18,
-    marginRight: spacing.xs,
+    fontSize: 20,
   },
 });

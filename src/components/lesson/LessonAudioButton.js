@@ -124,8 +124,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   fallbackCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
     borderRadius: radius.md,
     borderWidth: 1,
     left: 0,
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   fallbackText: {
-    color: colors.text,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 14,
     lineHeight: 19,

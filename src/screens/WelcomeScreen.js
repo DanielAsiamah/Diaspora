@@ -13,45 +13,19 @@ import AnimatedAtmosphere from '../components/AnimatedAtmosphere';
 import MascotHero from '../components/MascotHero';
 import PrimaryButton from '../components/PrimaryButton';
 import SpeechBubble from '../components/SpeechBubble';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius, shadows, spacing } from '../theme';
 
-const GREETINGS = [
-  'Wah gwaan!',
-  'Hujambo!',
-  'Sak pase!',
-  'Nangaadef!',
-];
+const GREETINGS = ['Wah gwaan!', 'Hujambo!', 'Sak pase!', 'Nanga def!'];
 
-const REGIONS = [
-  {
-    id: 'africa',
-    title: 'Africa',
-    caption: 'Swahili · Igbo · Wolof',
-    color: colors.africaGold,
-  },
-  {
-    id: 'caribbean',
-    title: 'Caribbean',
-    caption: 'Patois · Haitian Creole',
-    color: colors.caribbeanGreen,
-  },
-  {
-    id: 'central-america',
-    title: 'Central America',
-    caption: 'Belizean Kriol',
-    color: colors.coral,
-  },
-  {
-    id: 'urban',
-    title: 'Urban dialects',
-    caption: 'AAVE & culture',
-    color: colors.blue,
-  },
+const LESSON_PROMISES = [
+  { label: 'Listen', detail: 'Hear real phrases first.' },
+  { label: 'Practice', detail: 'Build answers step by step.' },
+  { label: 'Culture', detail: 'Learn the meaning behind words.' },
 ];
 
 export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(22)).current;
+  const slideAnim = useRef(new Animated.Value(18)).current;
   const [greetingIndex, setGreetingIndex] = useState(0);
   const bubbleFade = useRef(new Animated.Value(1)).current;
 
@@ -59,7 +33,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 650,
+        duration: 580,
         useNativeDriver: true,
       }),
       Animated.spring(slideAnim, {
@@ -73,13 +47,13 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
     const interval = setInterval(() => {
       Animated.timing(bubbleFade, {
         toValue: 0,
-        duration: 220,
+        duration: 200,
         useNativeDriver: true,
       }).start(() => {
         setGreetingIndex((prev) => (prev + 1) % GREETINGS.length);
         Animated.timing(bubbleFade, {
           toValue: 1,
-          duration: 320,
+          duration: 260,
           useNativeDriver: true,
         }).start();
       });
@@ -91,15 +65,12 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   return (
     <View style={styles.root}>
       <AnimatedAtmosphere
-        colors={[colors.splashGreen, colors.skyTop, colors.skyBottom]}
-        accent={colors.caribbeanGreen}
+        colors={['#F7FCF9', '#EEF8F4']}
+        accent={colors.primary}
       />
 
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Animated.View
             style={{
               opacity: fadeAnim,
@@ -117,27 +88,21 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
 
             <View style={styles.heroCopy}>
               <Animated.View style={{ opacity: bubbleFade }}>
-                <SpeechBubble text={GREETINGS[greetingIndex]} />
+                <SpeechBubble text={GREETINGS[greetingIndex]} tone="light" />
               </Animated.View>
               <Text style={styles.title}>Learn the languages{'\n'}of the diaspora</Text>
               <Text style={styles.subtitle}>
-                Fun, bite-sized lessons for mother tongues, creoles, and dialects that carry culture.
+                Bite-sized lessons in creoles, mother tongues, and cultural speech.
               </Text>
             </View>
 
-            <View style={styles.regionsSection}>
-              <Text style={styles.sectionHeader}>START YOUR PATH</Text>
-              <View style={styles.regionsGrid}>
-                {REGIONS.map((region) => (
-                  <View
-                    key={region.id}
-                    style={[styles.regionCard, { borderColor: region.color + '66' }]}
-                  >
-                    <Text style={[styles.regionTitle, { color: region.color }]}>{region.title}</Text>
-                    <Text style={styles.regionCaption}>{region.caption}</Text>
-                  </View>
-                ))}
-              </View>
+            <View style={styles.promiseGrid}>
+              {LESSON_PROMISES.map((item) => (
+                <View key={item.label} style={styles.promiseCard}>
+                  <Text style={styles.promiseLabel}>{item.label}</Text>
+                  <Text style={styles.promiseDetail}>{item.detail}</Text>
+                </View>
+              ))}
             </View>
           </Animated.View>
         </ScrollView>
@@ -147,7 +112,6 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           <Pressable onPress={onSignIn} style={styles.signInButton}>
             <Text style={styles.signInText}>I already have an account</Text>
           </Pressable>
-          <Text style={styles.footerNote}>Free to start · learn in bite-sized lessons</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -156,7 +120,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: colors.skyBottom,
+    backgroundColor: '#F7FCF9',
     flex: 1,
   },
   safeArea: {
@@ -171,85 +135,75 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.md,
   },
   logoBadge: {
     alignItems: 'center',
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     borderRadius: radius.pill,
     height: 42,
     justifyContent: 'center',
     width: 42,
   },
   logoText: {
-    color: colors.splash,
+    color: '#FFFFFF',
     fontFamily: fonts.black,
     fontSize: 18,
   },
   brandName: {
-    color: colors.textDark,
+    color: '#102018',
     fontFamily: fonts.black,
-    fontSize: 22,
+    fontSize: 23,
   },
   heroCopy: {
     alignItems: 'center',
     marginTop: spacing.md,
   },
   title: {
-    color: colors.textDark,
+    color: '#102018',
     fontFamily: fonts.black,
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 31,
+    lineHeight: 38,
     marginTop: spacing.sm,
     textAlign: 'center',
   },
   subtitle: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.semiBold,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 24,
     marginTop: spacing.sm,
+    maxWidth: 320,
     textAlign: 'center',
   },
-  regionsSection: {
-    marginTop: spacing.lg,
-  },
-  sectionHeader: {
-    color: colors.textLight,
-    fontFamily: fonts.black,
-    fontSize: 12,
-    letterSpacing: 0.8,
-    marginBottom: spacing.md,
-    textTransform: 'uppercase',
-  },
-  regionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  promiseGrid: {
     gap: spacing.sm,
+    marginTop: spacing.xl,
   },
-  regionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    flexGrow: 1,
-    minWidth: '47%',
-    padding: spacing.sm,
+  promiseCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    ...shadows.soft,
   },
-  regionTitle: {
+  promiseLabel: {
+    color: colors.primaryDark,
     fontFamily: fonts.black,
-    fontSize: 15,
+    fontSize: 16,
   },
-  regionCaption: {
-    color: colors.textMuted,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    lineHeight: 17,
+  promiseDetail: {
+    color: '#66756C',
+    fontFamily: fonts.semiBold,
+    fontSize: 14,
+    lineHeight: 21,
     marginTop: 4,
   },
   footer: {
-    backgroundColor: colors.skyBottom,
-    borderTopColor: colors.border,
-    borderTopWidth: 1.5,
+    backgroundColor: 'rgba(247,252,249,0.96)',
+    borderTopColor: '#E1EEE8',
+    borderTopWidth: 1,
     gap: spacing.sm,
     paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
@@ -263,11 +217,5 @@ const styles = StyleSheet.create({
     color: colors.blue,
     fontFamily: fonts.extraBold,
     fontSize: 15,
-  },
-  footerNote: {
-    color: colors.textLight,
-    fontFamily: fonts.semiBold,
-    fontSize: 12,
-    textAlign: 'center',
   },
 });

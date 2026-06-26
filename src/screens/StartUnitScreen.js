@@ -10,7 +10,7 @@ import {
 
 import PrimaryButton from '../components/PrimaryButton';
 import LanguageMascot from '../components/lesson/LanguageMascot';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius, shadows, spacing } from '../theme';
 
 const COURSE_LABELS = {
   patois: 'Jamaican Patois',
@@ -36,7 +36,7 @@ export default function StartUnitScreen({
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={[colors.skyTop, colors.skyBottom]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#F7FCF9', '#EEF8F4']} style={StyleSheet.absoluteFill} />
 
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
@@ -104,7 +104,7 @@ export default function StartUnitScreen({
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: colors.skyBottom,
+    backgroundColor: '#F7FCF9',
     flex: 1,
   },
   safeArea: {
@@ -123,12 +123,12 @@ const styles = StyleSheet.create({
     paddingRight: spacing.sm,
   },
   backText: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.black,
     fontSize: 14,
   },
   progressContainer: {
-    backgroundColor: colors.border,
+    backgroundColor: '#DCEAE4',
     borderRadius: radius.pill,
     flex: 1,
     height: 10,
@@ -157,14 +157,14 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: colors.text,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 30,
     lineHeight: 38,
     marginTop: spacing.sm,
   },
   subtitle: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.semiBold,
     fontSize: 15,
     lineHeight: 23,
@@ -175,16 +175,17 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
   },
   optionCard: {
-    backgroundColor: colors.surface,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 5,
-    borderColor: colors.border,
+    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#DDEAE4',
+    borderBottomWidth: 4,
+    borderColor: '#E1EEE8',
     borderRadius: radius.xl,
     borderWidth: 2,
     padding: spacing.lg,
+    ...shadows.soft,
   },
   optionCardSelected: {
-    backgroundColor: colors.primaryLight,
+    backgroundColor: '#F1FFF6',
     borderBottomColor: colors.primaryDark,
     borderColor: colors.primary,
   },
@@ -196,21 +197,21 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   optionTitle: {
-    color: colors.text,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 23,
     marginTop: spacing.sm,
   },
   optionBody: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.semiBold,
     fontSize: 14,
     lineHeight: 21,
     marginTop: spacing.xs,
   },
   footer: {
-    backgroundColor: colors.skyBottom,
-    borderTopColor: colors.border,
+    backgroundColor: 'rgba(247,252,249,0.96)',
+    borderTopColor: '#E1EEE8',
     borderTopWidth: 1,
     padding: spacing.lg,
   },

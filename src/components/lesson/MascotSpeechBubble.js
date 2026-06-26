@@ -14,8 +14,8 @@ export default function MascotSpeechBubble({ eyebrow, children }) {
 
 const styles = StyleSheet.create({
   bubble: {
-    backgroundColor: colors.surface,
-    borderColor: '#4A3529',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
     borderRadius: radius.xl,
     borderWidth: 2,
     flex: 1,
@@ -23,10 +23,10 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   tail: {
-    backgroundColor: colors.surface,
-    borderBottomColor: '#4A3529',
+    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#E1EEE8',
     borderBottomWidth: 2,
-    borderLeftColor: '#4A3529',
+    borderLeftColor: '#E1EEE8',
     borderLeftWidth: 2,
     height: 18,
     left: -10,
@@ -44,7 +44,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   copy: {
-    color: colors.text,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 19,
     lineHeight: 27,

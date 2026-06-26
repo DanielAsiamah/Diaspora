@@ -2,13 +2,14 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { colors, fonts, radius } from '../theme';
 
-export default function SpeechBubble({ text }) {
+export default function SpeechBubble({ text, tone = 'dark' }) {
+  const light = tone === 'light';
   return (
     <View style={styles.wrapper}>
-      <View style={styles.bubble}>
-        <Text style={styles.text}>{text}</Text>
+      <View style={[styles.bubble, light && styles.bubbleLight]}>
+        <Text style={[styles.text, light && styles.textLight]}>{text}</Text>
       </View>
-      <View style={styles.tail} />
+      <View style={[styles.tail, light && styles.tailLight]} />
     </View>
   );
 }
@@ -46,5 +47,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: 18,
     textAlign: 'center',
+  },
+  bubbleLight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
+  },
+  tailLight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
+  },
+  textLight: {
+    color: '#102018',
   },
 });

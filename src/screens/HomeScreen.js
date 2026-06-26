@@ -580,7 +580,7 @@ function LessonPlayer({
             onPress={onExit}
             style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
           >
-            <Text style={styles.closeButtonText}>Ã—</Text>
+            <Text style={styles.closeButtonText}>×</Text>
           </Pressable>
           <View style={styles.lessonProgressTrack}>
             <View style={[styles.lessonProgressFill, { width: `${Math.max(progress * 100, 12)}%` }]} />

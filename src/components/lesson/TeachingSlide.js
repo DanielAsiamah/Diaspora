@@ -102,7 +102,7 @@ export default function TeachingSlide({
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#140F0C',
+    backgroundColor: '#F7FCF9',
     flex: 1,
   },
   topBar: {
@@ -114,8 +114,8 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     alignItems: 'center',
-    backgroundColor: '#2B211B',
-    borderColor: '#4A3529',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E1EEE8',
     borderRadius: 24,
     borderWidth: 1,
     height: 48,
@@ -126,13 +126,13 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   closeButtonText: {
-    color: colors.text,
+    color: '#102018',
     fontFamily: fonts.black,
     fontSize: 25,
     lineHeight: 27,
   },
   lessonProgressTrack: {
-    backgroundColor: '#33261F',
+    backgroundColor: '#DCEAE4',
     borderRadius: radius.pill,
     flex: 1,
     height: 18,
@@ -160,8 +160,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   explainCard: {
-    backgroundColor: 'rgba(244, 185, 66, 0.1)',
-    borderColor: 'rgba(244, 185, 66, 0.25)',
+    backgroundColor: '#FFF8E8',
+    borderColor: 'rgba(244, 185, 66, 0.42)',
     borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: spacing.lg,
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   explainBody: {
-    color: colors.textMuted,
+    color: '#66756C',
     fontFamily: fonts.semiBold,
     fontSize: 14,
     lineHeight: 21,
@@ -184,8 +184,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   footer: {
-    backgroundColor: '#1E1612',
-    borderTopColor: '#2E221B',
+    backgroundColor: 'rgba(247,252,249,0.96)',
+    borderTopColor: '#E1EEE8',
     borderTopWidth: 1,
     bottom: 0,
     left: 0,

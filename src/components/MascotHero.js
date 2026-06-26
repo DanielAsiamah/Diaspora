@@ -1,46 +1,21 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, fonts, radius, shadows } from '../theme';
+import MascotAvatar from './mascot/MascotAvatar';
 
-export default function MascotHero() {
+export default function MascotHero({ languageId = 'patois', mood = 'happy', compact = false }) {
   return (
-    <View style={styles.wrapper}>
-      <View style={styles.sun} />
-      <View style={styles.cloudLeft} />
-      <View style={styles.cloudRight} />
-
-      <View style={styles.characterRow}>
-        <View style={styles.palm}>
-          <View style={styles.palmTrunk} />
-          <View style={styles.palmLeaves}>
-            <View style={[styles.leaf, styles.leafLeft]} />
-            <View style={[styles.leaf, styles.leafCenter]} />
-            <View style={[styles.leaf, styles.leafRight]} />
+    <View style={[styles.wrapper, compact && styles.wrapperCompact]}>
+      <View style={styles.heroCard}>
+        <View style={styles.orbitOne} />
+        <View style={styles.orbitTwo} />
+        <MascotAvatar languageId={languageId} mood={mood} size={compact ? 0.72 : 1.05} />
+        {!compact ? (
+          <View style={styles.captionPill}>
+            <Text style={styles.caption}>Your tutor is ready</Text>
           </View>
-        </View>
-
-        <View style={styles.character}>
-          <View style={styles.headband} />
-          <View style={styles.face}>
-            <View style={styles.eyesRow}>
-              <View style={styles.eye}>
-                <View style={styles.pupil} />
-              </View>
-              <View style={styles.eye}>
-                <View style={styles.pupil} />
-              </View>
-            </View>
-            <View style={styles.smile} />
-            <View style={styles.cheekLeft} />
-            <View style={styles.cheekRight} />
-          </View>
-          <View style={styles.body}>
-            <View style={styles.shirtStripe} />
-          </View>
-        </View>
+        ) : null}
       </View>
-
-      <View style={styles.ground} />
     </View>
   );
 }
@@ -48,168 +23,58 @@ export default function MascotHero() {
 const styles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
-    height: 240,
-    justifyContent: 'flex-end',
+    marginVertical: 8,
     width: '100%',
   },
-  sun: {
-    backgroundColor: colors.accent,
-    borderRadius: 999,
-    height: 56,
-    position: 'absolute',
-    right: 24,
-    top: 8,
-    width: 56,
+  wrapperCompact: {
+    marginVertical: 0,
   },
-  cloudLeft: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 999,
-    height: 28,
-    left: 18,
-    position: 'absolute',
-    top: 28,
-    width: 72,
-  },
-  cloudRight: {
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    borderRadius: 999,
-    height: 22,
-    position: 'absolute',
-    right: 96,
-    top: 52,
-    width: 56,
-  },
-  characterRow: {
-    alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 18,
-  },
-  palm: {
+  heroCard: {
     alignItems: 'center',
-    marginBottom: 4,
-    width: 54,
-  },
-  palmTrunk: {
-    backgroundColor: '#8B5E3C',
-    borderRadius: 8,
-    height: 42,
-    width: 12,
-  },
-  palmLeaves: {
-    alignItems: 'center',
-    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E9F3EF',
+    borderRadius: 42,
+    borderWidth: 1,
+    minHeight: 218,
     justifyContent: 'center',
-    marginBottom: -8,
-    width: 54,
-  },
-  leaf: {
-    backgroundColor: colors.grassDark,
-    borderRadius: 999,
-    height: 28,
-    position: 'absolute',
-    width: 12,
-  },
-  leafLeft: {
-    left: 8,
-    transform: [{ rotate: '-28deg' }],
-  },
-  leafCenter: {
-    top: -10,
-  },
-  leafRight: {
-    right: 8,
-    transform: [{ rotate: '28deg' }],
-  },
-  character: {
-    alignItems: 'center',
-  },
-  headband: {
-    backgroundColor: colors.grassDark,
-    borderRadius: 999,
-    height: 18,
-    marginBottom: -10,
-    width: 92,
-    zIndex: 2,
-  },
-  face: {
-    alignItems: 'center',
-    backgroundColor: colors.accent,
-    borderColor: '#E6A600',
-    borderRadius: 999,
-    borderWidth: 3,
-    height: 92,
-    justifyContent: 'center',
-    width: 92,
-    zIndex: 1,
-  },
-  eyesRow: {
-    flexDirection: 'row',
-    gap: 18,
-    marginTop: 4,
-  },
-  eye: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 999,
-    height: 18,
-    justifyContent: 'center',
-    width: 18,
-  },
-  pupil: {
-    backgroundColor: colors.textDark,
-    borderRadius: 999,
-    height: 8,
-    width: 8,
-  },
-  smile: {
-    backgroundColor: 'transparent',
-    borderBottomColor: colors.textDark,
-    borderBottomWidth: 3,
-    borderRadius: 999,
-    height: 10,
-    marginTop: 8,
-    width: 24,
-  },
-  cheekLeft: {
-    backgroundColor: 'rgba(255,107,107,0.35)',
-    borderRadius: 999,
-    height: 12,
-    left: 12,
-    position: 'absolute',
-    top: 52,
-    width: 12,
-  },
-  cheekRight: {
-    backgroundColor: 'rgba(255,107,107,0.35)',
-    borderRadius: 999,
-    height: 12,
-    position: 'absolute',
-    right: 12,
-    top: 52,
-    width: 12,
-  },
-  body: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primaryDark,
-    borderRadius: 18,
-    borderWidth: 3,
-    height: 56,
-    marginTop: -8,
     overflow: 'hidden',
-    width: 72,
-  },
-  shirtStripe: {
-    backgroundColor: colors.accent,
-    height: 10,
-    marginTop: 18,
+    paddingTop: 22,
     width: '100%',
+    ...shadows.card,
   },
-  ground: {
-    backgroundColor: colors.grass,
-    borderTopLeftRadius: 999,
-    borderTopRightRadius: 999,
-    height: 36,
-    width: '110%',
+  orbitOne: {
+    backgroundColor: 'rgba(53, 208, 197, 0.12)',
+    borderRadius: radius.pill,
+    height: 190,
+    position: 'absolute',
+    right: -72,
+    top: -58,
+    width: 190,
+  },
+  orbitTwo: {
+    backgroundColor: 'rgba(244, 185, 66, 0.14)',
+    borderRadius: radius.pill,
+    bottom: -65,
+    height: 160,
+    left: -54,
+    position: 'absolute',
+    width: 160,
+  },
+  captionPill: {
+    backgroundColor: colors.primaryLight,
+    borderColor: 'rgba(31, 190, 86, 0.24)',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    marginBottom: 18,
+    marginTop: -2,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  caption: {
+    color: colors.primaryDark,
+    fontFamily: fonts.black,
+    fontSize: 12,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 });
