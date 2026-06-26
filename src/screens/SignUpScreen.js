@@ -61,12 +61,12 @@ export default function SignUpScreen({ onSuccess, onSignIn, onBack }) {
     setLoading(true);
 
     try {
-      const result = await signUp({
+      await signUp({
         username: username.trim(),
         email,
         password,
       });
-      onSuccess(result?.profile);
+      onSuccess();
     } catch (error) {
       setFormError(getAuthErrorMessage(error));
     } finally {

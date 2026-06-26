@@ -3,7 +3,6 @@ import { useAudioPlayer } from 'expo-audio';
 import { StatusBar } from 'expo-status-bar';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   SafeAreaView,
@@ -24,8 +23,9 @@ import TeachingSlide from '../components/lesson/TeachingSlide';
 import VocabularyCard from '../components/lesson/VocabularyCard';
 import { useAuth } from '../context/AuthContext';
 import { useGame } from '../context/GameContext';
-import { getCourseById, getPublishedUnits } from '../data/curriculumRepository';
-import { getLessonAudioSource } from '../data/generatedAudioRegistry';
+import { getCourseById, loadCourseById } from '../data/curriculumRepository';
+import { getLessonAudioSource, getLessonAudioSourceByText } from '../data/generatedAudioRegistry';
+import { getVocabImageSource } from '../data/generatedImageRegistry';
 import {
   createLessonSteps,
   createMistakeStep,
@@ -315,8 +315,26 @@ function PathNode({ node, index, isCompleted, isActive, isLocked, themeColor, ac
   );
 }
 
-function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNextLesson, onExit, onMistake, onComplete }) {
-  const lessonSteps = useMemo(() => createLessonSteps(lesson, phrasePool, courseId), [lesson, phrasePool, courseId]);
+function LessonPlayer({
+  lesson,
+  phrasePool,
+  courseId,
+  hearts,
+  maxHearts,
+  hasNextLesson,
+  onExit,
+  onMistake,
+  onComplete,
+  onSessionStart,
+  onAnswer,
+}) {
+  const lessonSteps = useMemo(() => {
+    if (Array.isArray(lesson?.steps) && lesson.steps.length > 0) {
+      return lesson.steps;
+    }
+
+    return createLessonSteps(lesson, phrasePool, courseId);
+  }, [lesson, phrasePool, courseId]);
   const practiceSteps = useMemo(() => getPracticeSteps(lessonSteps), [lessonSteps]);
   const introStep = lessonSteps.find((item) => item.id === 'lesson-intro');
   const sessionStartedAtRef = useRef(Date.now());
@@ -332,6 +350,8 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
   const [audioHelperText, setAudioHelperText] = useState(null);
   const [sessionComplete, setSessionComplete] = useState(false);
   const advanceTimerRef = useRef(null);
+  const lastSoundAtRef = useRef(0);
+  const sessionIdRef = useRef(null);
 
   const exercise = practiceSteps[step];
   const lessonAudioSource = getLessonAudioSource(courseId, exercise?.audioKey);
@@ -349,16 +369,50 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function startSession() {
+      const sessionId = await onSessionStart?.({
+        languageId: courseId,
+        lessonId: lesson.id,
+        lessonTitle: lesson.title || lesson.meaning || null,
+        unitId: lesson.unitId || null,
+        unitTitle: lesson.unitTitle || null,
+        startedAtMs: sessionStartedAtRef.current,
+        totalQuestions: practiceSteps.length,
+      });
+
+      if (!cancelled) {
+        sessionIdRef.current = sessionId || null;
+      }
+    }
+
+    startSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, lesson.id, lesson.meaning, lesson.title, lesson.unitId, lesson.unitTitle, onSessionStart, practiceSteps.length]);
+
   function selectedAnswer() {
+    if (exercise?.type === 'match_pairs') return selectedChoice;
     if (exercise?.choices) return selectedChoice;
     return builtWords.join(' ');
   }
 
   function canCheck() {
+    if (exercise?.type === 'match_pairs') return selectedChoice === '__matched__';
     return exercise?.choices ? Boolean(selectedChoice) : builtWords.length > 0;
   }
 
   function playFeedbackSound(soundPlayer) {
+    const now = Date.now();
+    if (now - lastSoundAtRef.current < 500) {
+      return;
+    }
+    lastSoundAtRef.current = now;
+
     try {
       const seekResult = soundPlayer.seekTo(0);
       if (seekResult?.then) {
@@ -383,8 +437,11 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
       correctAnswer: exercise.answer,
       correct,
       answeredAt: Date.now(),
+      timeTakenMs: Date.now() - sessionStartedAtRef.current,
+      xp: correct ? exercise.xp || 5 : 0,
     };
     setAttempts((current) => [...current, attempt]);
+    onAnswer?.(sessionIdRef.current, attempt)?.catch(() => {});
     playFeedbackSound(correct ? correctSound : wrongSound);
     Vibration.vibrate(correct ? 35 : [0, 80, 70, 120]);
     if (!correct) {
@@ -444,12 +501,19 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
   }
 
   function showMistakeCutsceneOrAdvance() {
-    setActiveCutscene(createMistakeStep(exercise, feedback?.answer || selectedAnswer()));
+    setActiveCutscene(exercise?.wrongFeedback || createMistakeStep(exercise, feedback?.answer || selectedAnswer()));
     setFeedback(null);
     setLessonStage('cutscene');
   }
 
   function showCutsceneOrAdvance() {
+    if (exercise?.correctCutscene) {
+      setActiveCutscene(exercise.correctCutscene);
+      setFeedback(null);
+      setLessonStage('cutscene');
+      return;
+    }
+
     if (shouldShowCutsceneAfterStep(step, practiceSteps)) {
       setActiveCutscene(getCorrectCutsceneStep(lesson, phrasePool, courseId, step));
       setFeedback(null);
@@ -478,6 +542,9 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
           onExit={onExit}
           onContinue={() => setLessonStage('practice')}
           getAudioSource={(item) => getLessonAudioSource(courseId, item?.audioKey)}
+          getNarrationSource={(text) => getLessonAudioSourceByText(courseId, text)}
+          getImageSource={(item) => getVocabImageSource(item?.imageKey, item?.category)}
+          characterState="neutral"
         />
       </SafeAreaView>
     );
@@ -494,6 +561,8 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
           onExit={onExit}
           onContinue={continueFromCutscene}
           audioSource={getLessonAudioSource(courseId, activeCutscene?.audioKey)}
+          narrationSource={getLessonAudioSourceByText(courseId, activeCutscene?.body)}
+          characterState={activeCutscene?.type === 'wrong_answer_feedback' ? 'sad' : 'happy'}
         />
       </SafeAreaView>
     );
@@ -533,6 +602,7 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
                 item={item}
                 index={index}
                 audioSource={getLessonAudioSource(courseId, item?.audioKey)}
+                imageSource={getVocabImageSource(item?.imageKey, item?.category)}
               />
             ))}
           </View>
@@ -575,7 +645,12 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
           </View>
           <PrimaryButton
             label={hasNextLesson ? 'CONTINUE TO NEXT LESSON' : 'BACK TO THE PATH'}
-            onPress={() => onComplete(createSessionSummary())}
+            onPress={() => {
+              onComplete({
+                ...createSessionSummary(),
+                sessionId: sessionIdRef.current,
+              });
+            }}
           />
         </View>
       </SafeAreaView>
@@ -612,6 +687,8 @@ function LessonPlayer({ lesson, phrasePool, courseId, hearts, maxHearts, hasNext
         audioHelperText={audioHelperText}
         normaliseAnswer={normaliseStepAnswer}
         lessonAudioSource={lessonAudioSource}
+        getAudioForText={(text) => getLessonAudioSourceByText(courseId, text)}
+        getImageForKey={(imageKey, category) => getVocabImageSource(imageKey, category)}
         onAudioFallbackPress={(text) => setAudioHelperText((current) => current === text ? null : text)}
       />
 
@@ -652,6 +729,8 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     isAuthenticated,
     loadLanguageProgress,
     recordLessonSession,
+    recordLessonAnswer,
+    finishLessonSession,
     syncLanguageProgress,
   } = useAuth();
   const {
@@ -675,6 +754,12 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
   const [purchasedItems, setPurchasedItems] = useState([]);
   const [languageProgress, setLanguageProgress] = useState(null);
   const [isProgressReady, setIsProgressReady] = useState(false);
+  const [course, setCourse] = useState(() => getCourseById(courseId));
+  const [notice, setNotice] = useState(null);
+
+  function showNotice(title, body, tone = 'info') {
+    setNotice({ title, body, tone });
+  }
 
   useEffect(() => {
     if (profile) {
@@ -698,12 +783,22 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
         return;
       }
 
-      const progress = await loadLanguageProgress(courseId);
-      if (cancelled) return;
+      try {
+        const progress = await loadLanguageProgress(courseId);
+        if (cancelled) return;
 
-      setLanguageProgress(progress);
-      setCompleted(progress?.completedLessons || []);
-      setIsProgressReady(true);
+        setLanguageProgress(progress);
+        setCompleted(progress?.completedLessons || []);
+      } catch {
+        if (cancelled) return;
+
+        setLanguageProgress(null);
+        setCompleted([]);
+      } finally {
+        if (!cancelled) {
+          setIsProgressReady(true);
+        }
+      }
     }
 
     hydrateProgress();
@@ -713,15 +808,26 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     };
   }, [courseId, isAuthenticated, loadLanguageProgress]);
 
-  const course = useMemo(() => {
-    const selectedCourse = getCourseById(courseId);
-    return {
-      ...selectedCourse,
-      units: getPublishedUnits(courseId),
+  useEffect(() => {
+    let cancelled = false;
+    setCourse(getCourseById(courseId));
+
+    async function hydrateCourse() {
+      const loadedCourse = await loadCourseById(courseId);
+      if (!cancelled) {
+        setCourse(loadedCourse);
+      }
+    }
+
+    hydrateCourse();
+
+    return () => {
+      cancelled = true;
     };
   }, [courseId]);
+
   const lessons = useMemo(
-    () => course.units.flatMap((unit) => unit.lessons),
+    () => (course.units || []).flatMap((unit) => unit.lessons || []),
     [course]
   );
   const playableLessons = useMemo(
@@ -749,19 +855,18 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
   function handleNodePress(node, index) {
     if (!isProgressReady) {
-      Alert.alert('Loading progress', 'Give us a second to load your saved path.');
       return;
     }
 
     const isLocked = index > 0 && !completed.includes(lessons[index - 1].id);
     if (isLocked) {
-      Alert.alert('Lesson locked', 'Finish the previous step first to unlock this lesson.');
+      showNotice('Lesson locked', 'Finish the previous step first to unlock this lesson.');
       return;
     }
 
     if (node.type === 'chest') {
       if (completed.includes(node.id)) {
-        Alert.alert('Already opened', 'You claimed this reward already.');
+        showNotice('Already opened', 'You claimed this reward already.');
         return;
       }
       const nextCompleted = [...completed, node.id];
@@ -786,7 +891,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
           lastPlayedAt: Date.now(),
         });
       }
-      Alert.alert('Chest opened! 🎁', `You earned ${node.xp} XP and 25 gems.`);
+      showNotice('Chest opened', `You earned ${node.xp} XP and 25 gems.`, 'success');
       return;
     }
 
@@ -795,7 +900,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
   function startLesson() {
     if (!hasHearts) {
-      Alert.alert('No hearts left', 'Refill hearts from the shop or wait before starting another lesson.');
+      showNotice('No hearts left', 'Refill hearts from the shop or wait before starting another lesson.', 'warning');
       return;
     }
     setActiveLesson(selectedNode);
@@ -811,8 +916,8 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     const xpEarned = wasFirstCompletion ? activeLesson.xp : 0;
     const gemsEarned = wasFirstCompletion ? 5 : 0;
 
-    if (isAuthenticated) {
-      recordLessonSession({
+    if (isAuthenticated && sessionSummary?.sessionId) {
+      finishLessonSession(sessionSummary.sessionId, {
         ...sessionSummary,
         xpEarned,
         gemsEarned,
@@ -883,7 +988,7 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
   function buyItem(itemId, cost) {
     if (gems < cost) {
-      Alert.alert('Not enough gems', 'Complete lessons and open chests to earn more.');
+      showNotice('Not enough gems', 'Complete lessons and open chests to earn more.', 'warning');
       return;
     }
 
@@ -900,9 +1005,9 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
     }
     if (itemId === 'refill') {
       refillHearts();
-      Alert.alert('Hearts refilled!', 'You are ready for more lessons.');
+      showNotice('Hearts refilled', 'You are ready for more lessons.', 'success');
     } else {
-      Alert.alert('Purchased!', 'This boost is now active.');
+      showNotice('Purchased', 'This boost is now active.', 'success');
     }
   }
 
@@ -919,6 +1024,8 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
         onExit={() => setActiveLesson(null)}
         onMistake={handleMistake}
         onComplete={completeLesson}
+        onSessionStart={recordLessonSession}
+        onAnswer={recordLessonAnswer}
       />
     );
   }
@@ -1096,6 +1203,8 @@ export default function HomeScreen({ courseId = 'patois', userLanguage, onBack }
 
       <LessonPreview node={selectedNode} course={course} onClose={() => setSelectedNode(null)} onStart={startLesson} />
 
+      <NoticePanel notice={notice} onDismiss={() => setNotice(null)} />
+
       <OutOfHeartsModal
         visible={showOutOfHearts}
         onClose={closeOutOfHearts}
@@ -1138,6 +1247,35 @@ function LessonPreview({ node, course, onClose, onStart }) {
         </View>
       </View>
     </Modal>
+  );
+}
+
+function NoticePanel({ notice, onDismiss }) {
+  if (!notice) return null;
+
+  const toneStyle = notice.tone === 'success'
+    ? styles.noticeSuccess
+    : notice.tone === 'warning'
+      ? styles.noticeWarning
+      : styles.noticeInfo;
+
+  return (
+    <View style={styles.noticeWrap} pointerEvents="box-none">
+      <View style={[styles.noticeCard, toneStyle]}>
+        <View style={styles.noticeCopy}>
+          <Text style={styles.noticeTitle}>{notice.title}</Text>
+          <Text style={styles.noticeBody}>{notice.body}</Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Dismiss message"
+          accessibilityRole="button"
+          onPress={onDismiss}
+          style={styles.noticeDismiss}
+        >
+          <Text style={styles.noticeDismissText}>×</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -1853,6 +1991,38 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.xxl,
   },
+  imageChoiceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  matchPairsGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  matchPairColumn: {
+    flex: 1,
+    gap: spacing.md,
+  },
+  matchPairCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderBottomWidth: 5,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    justifyContent: 'center',
+    minHeight: 72,
+    padding: spacing.sm,
+  },
+  matchPairText: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 16,
+    textAlign: 'center',
+  },
   revealCard: {
     alignItems: 'center',
     backgroundColor: '#1E1612',
@@ -1918,6 +2088,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 2,
     padding: spacing.md,
+  },
+  imageChoiceCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: '#4A3529',
+    borderBottomWidth: 5,
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    flexBasis: '47%',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    minHeight: 170,
+    padding: spacing.md,
+  },
+  imageChoiceArt: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.lg,
+    height: 96,
+    width: '100%',
   },
   answerCardSelected: {
     backgroundColor: 'rgba(244, 185, 66, 0.14)',
@@ -2129,5 +2318,61 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginTop: spacing.sm,
+  },
+  noticeWrap: {
+    bottom: ui.bottomTabHeight + spacing.md,
+    left: spacing.md,
+    position: 'absolute',
+    right: spacing.md,
+    zIndex: 50,
+  },
+  noticeCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1612',
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.md,
+    ...shadows.card,
+  },
+  noticeInfo: {
+    borderColor: colors.blue,
+  },
+  noticeSuccess: {
+    borderColor: colors.primary,
+  },
+  noticeWarning: {
+    borderColor: colors.accent,
+  },
+  noticeCopy: {
+    flex: 1,
+  },
+  noticeTitle: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 15,
+  },
+  noticeBody: {
+    color: colors.textMuted,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  noticeDismiss: {
+    alignItems: 'center',
+    backgroundColor: '#2B211B',
+    borderRadius: radius.pill,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  noticeDismissText: {
+    color: colors.text,
+    fontFamily: fonts.black,
+    fontSize: 22,
+    lineHeight: 23,
   },
 });

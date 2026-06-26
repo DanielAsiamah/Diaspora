@@ -53,6 +53,7 @@ function parseArgs(argv) {
     concurrency: null,
     configPath: defaultConfig,
     registryOnly: false,
+    includeInteractions: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -60,6 +61,7 @@ function parseArgs(argv) {
     if (argument === '--dry-run') options.dryRun = true;
     else if (argument === '--force') options.force = true;
     else if (argument === '--registry-only') options.registryOnly = true;
+    else if (argument === '--include-interactions') options.includeInteractions = true;
     else if (argument === '--source') options.source = argv[++index];
     else if (argument === '--language') options.language = keyPart(argv[++index]);
     else if (argument === '--limit') options.limit = Number(argv[++index]);
@@ -95,6 +97,7 @@ Options:
   --concurrency 2        Number of simultaneous API calls
   --force                Regenerate MP3 files that already exist
   --registry-only        Rebuild the Expo static audio registry without API calls
+  --include-interactions Generate extra button/tile/cutscene narration audio
   --config path          Voice configuration path
   --help                 Show this message`);
 }
@@ -123,7 +126,7 @@ function writeAudioRegistry() {
     const assetPath = `../../assets/audio/${languageId}/${filename}`;
     return `  ${JSON.stringify(key)}: require(${JSON.stringify(assetPath)}),`;
   });
-  const output = `// Generated from assets/audio. Do not edit by hand.\n\nconst lessonAudioSources = {\n${entries.join('\n')}\n};\n\nexport function getLessonAudioSource(languageId, audioName) {\n  const language = String(languageId ?? '').trim().toLowerCase();\n  const filename = String(audioName ?? '').trim().split(/[\\\\/]/).pop();\n  if (!filename) return null;\n\n  const exactSource = lessonAudioSources[\`\${language}/\${filename}\`];\n  if (exactSource) return exactSource;\n\n  const filenameSuffix = \`/\${filename}\`;\n  const matches = Object.entries(lessonAudioSources)\n    .filter(([key]) => key.endsWith(filenameSuffix));\n  return matches.length === 1 ? matches[0][1] : null;\n}\n`;
+  const output = `// Generated from assets/audio. Do not edit by hand.\n\nconst lessonAudioSources = {\n${entries.join('\n')}\n};\n\nfunction audioSlug(value) {\n  return String(value ?? '')\n    .trim()\n    .toLocaleLowerCase()\n    .normalize('NFKD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9]+/g, '_')\n    .replace(/^_+|_+$/g, '') || 'phrase';\n}\n\nexport function getLessonAudioSource(languageId, audioName) {\n  const language = String(languageId ?? '').trim().toLowerCase();\n  const filename = String(audioName ?? '').trim().split(/[\\\\/]/).pop();\n  if (!filename) return null;\n\n  const exactSource = lessonAudioSources[\`\${language}/\${filename}\`];\n  if (exactSource) return exactSource;\n\n  const filenameSuffix = \`/\${filename}\`;\n  const matches = Object.entries(lessonAudioSources)\n    .filter(([key]) => key.endsWith(filenameSuffix));\n  return matches.length === 1 ? matches[0][1] : null;\n}\n\nexport function getLessonAudioSourceByText(languageId, text) {\n  const slug = audioSlug(text);\n  return getLessonAudioSource(languageId, \`\${slug}.mp3\`);\n}\n`;
   fs.mkdirSync(path.dirname(registryOutputPath), { recursive: true });
   fs.writeFileSync(registryOutputPath, output, 'utf8');
   return files.length;
@@ -143,6 +146,118 @@ function loadRows(source) {
     sourcePath: defaultWorkbook,
     rows: xlsx.utils.sheet_to_json(sheet, { defval: '' }),
   };
+}
+
+const cultureFacts = {
+  patois: [
+    'Jamaican Patois grew from contact between English and West African languages, then kept changing through everyday Jamaican life.',
+    'Jamaica has given the world reggae, dancehall, sprinting legends, bold food culture and everyday phrases people recognise far beyond the island.',
+    'In casual Jamaican speech, greetings can carry warmth, respect and relationship. Tone matters as much as the words.',
+  ],
+  swahili: [
+    'Swahili is spoken across East Africa and carries influences from African languages, Arabic and Indian Ocean trade.',
+    'A greeting can be more than hello in Swahili. It often opens a polite social exchange.',
+  ],
+  igbo: [
+    'Igbo is a major language of southeastern Nigeria, with many dialects and strong oral storytelling traditions.',
+    'In Igbo culture, greetings can show respect, age awareness and community connection.',
+  ],
+  wolof: [
+    'Wolof is widely spoken in Senegal and The Gambia, and greetings are an important part of everyday politeness.',
+    'A Wolof greeting can turn into a short conversation because checking on people matters.',
+  ],
+  haitian: [
+    'Haitian Creole is a full language with French influence and deep African language roots.',
+    'Haitian Creole carries history, identity and everyday creativity in the way people speak.',
+  ],
+  belizean: [
+    'Belizean Creole reflects Belize history, Caribbean culture and contact between many communities.',
+    'Belize is multilingual, so many speakers move naturally between Creole, English and other languages.',
+  ],
+  aave: [
+    'AAVE has its own grammar, sound patterns and history. It is not broken English.',
+    'AAVE has shaped music, comedy, internet language and global pop culture in powerful ways.',
+  ],
+};
+
+function wordTokens(value) {
+  return normalise(value)
+    .replace(/[?!.,/]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function titleCase(value = '') {
+  return value
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function addSyntheticRow(rows, seen, languageId, text) {
+  const phrase = normalise(text);
+  if (!languageId || !phrase) return;
+  const key = `${languageId}|${keyPart(phrase)}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+
+  rows.push({
+    language_id: languageId,
+    native: phrase,
+    audio_name: `${fileSlug(phrase)}.mp3`,
+  });
+}
+
+function expandRowsWithInteractionAudio(rows) {
+  const expanded = [...rows];
+  const seen = new Set(rows.map((row) => {
+    const languageId = keyPart(row.language_id ?? row.languageId);
+    const phrase = normalise(row.native ?? row.prompt ?? row.phrase);
+    return `${languageId}|${keyPart(phrase)}`;
+  }));
+  const categoriesByLanguage = new Map();
+
+  for (const row of rows) {
+    const languageId = keyPart(row.language_id ?? row.languageId);
+    const native = normalise(row.native ?? row.prompt ?? row.phrase);
+    const english = normalise(row.english ?? row.meaning ?? row.answer);
+    const category = normalise(row.category);
+    if (!languageId) continue;
+
+    if (category) {
+      const categories = categoriesByLanguage.get(languageId) || new Set();
+      categories.add(category);
+      categoriesByLanguage.set(languageId, categories);
+    }
+
+    addSyntheticRow(expanded, seen, languageId, english);
+    for (const token of [...wordTokens(native), ...wordTokens(english)]) {
+      addSyntheticRow(expanded, seen, languageId, token);
+    }
+
+    if (native && english) {
+      addSyntheticRow(expanded, seen, languageId, `${native} means "${english}". Try saying it once before the next challenge.`);
+    }
+  }
+
+  for (const [languageId, categories] of categoriesByLanguage.entries()) {
+    for (const category of categories) {
+      const topic = titleCase(category).toLowerCase();
+      addSyntheticRow(expanded, seen, languageId, `Today we are learning ${topic}. Listen first, then you will practice.`);
+    }
+  }
+
+  for (const [languageId, facts] of Object.entries(cultureFacts)) {
+    for (const fact of facts) {
+      addSyntheticRow(expanded, seen, languageId, fact);
+    }
+  }
+
+  addSyntheticRow(expanded, seen, 'patois', 'First you recognise the phrase. Then you build it yourself. That is how it starts to stick.');
+  addSyntheticRow(expanded, seen, 'patois', 'You are building real recall.');
+
+  return expanded;
 }
 
 function createTasks(rows, options, config) {
@@ -250,7 +365,8 @@ async function main() {
   if (!fs.existsSync(options.configPath)) throw new Error(`Voice config not found: ${options.configPath}`);
 
   const config = JSON.parse(fs.readFileSync(options.configPath, 'utf8'));
-  const { sourcePath, rows } = loadRows(options.source);
+  const { sourcePath, rows: sourceRows } = loadRows(options.source);
+  const rows = options.includeInteractions ? expandRowsWithInteractionAudio(sourceRows) : sourceRows;
   const tasks = createTasks(rows, options, config);
   if (!tasks.length) throw new Error('No phrases matched the selected source and language.');
 

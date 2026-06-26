@@ -83,6 +83,7 @@ languages.forEach((language, languageIndex) => {
           subtitle: 'Tap the word to reveal its meaning',
           phrase: word.native,
           meaning: word.english,
+          category,
           note: normalise(word.pronunciation)
             ? `Pronounced: ${normalise(word.pronunciation)}`
             : 'Pronunciation guide coming soon.',

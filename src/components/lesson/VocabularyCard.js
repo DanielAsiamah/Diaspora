@@ -1,14 +1,18 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { colors, fonts, radius, spacing } from '../../theme';
 import LessonAudioButton from './LessonAudioButton';
 
-export default function VocabularyCard({ item, audioSource, index }) {
+export default function VocabularyCard({ item, audioSource, imageSource, index, onAudioPlay }) {
   return (
     <View style={styles.card}>
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>{index + 1}</Text>
-      </View>
+      {imageSource ? (
+        <Image source={imageSource} style={styles.image} resizeMode="contain" />
+      ) : (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{index + 1}</Text>
+        </View>
+      )}
       <View style={styles.copy}>
         <Text style={styles.word}>{item.phrase}</Text>
         <Text style={styles.meaning}>{item.meaning}</Text>
@@ -19,6 +23,7 @@ export default function VocabularyCard({ item, audioSource, index }) {
         label={`Play pronunciation for ${item.phrase}`}
         source={audioSource}
         fallbackText={item.phrase}
+        onAudioPlay={onAudioPlay}
       />
     </View>
   );
@@ -51,6 +56,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.black,
     fontSize: 16,
+  },
+  image: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#4A3529',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    height: 58,
+    width: 58,
   },
   copy: {
     flex: 1,

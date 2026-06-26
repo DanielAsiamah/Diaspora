@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef } from 'react';
 import {
   Animated,
@@ -9,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import AnimatedAtmosphere from '../components/AnimatedAtmosphere';
 import { colors, fonts, radius, spacing } from '../theme';
 
 const NATIVE_LANGUAGES = [
@@ -57,9 +57,9 @@ export default function LanguageSelectScreen({ onSelectLanguage, onBack }) {
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.skyTop, colors.skyBottom]}
-        style={StyleSheet.absoluteFill}
+      <AnimatedAtmosphere
+        colors={[colors.splashGreen, colors.skyTop, colors.skyBottom]}
+        accent={colors.blue}
       />
 
       <SafeAreaView style={styles.safeArea}>

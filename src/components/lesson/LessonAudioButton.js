@@ -10,6 +10,7 @@ export default function LessonAudioButton({
   compact = false,
   fallbackText,
   onFallbackPress,
+  onAudioPlay,
   autoPlay = false,
 }) {
   const player = useAudioPlayer(source);
@@ -18,6 +19,8 @@ export default function LessonAudioButton({
   if (!source) return null;
 
   function play() {
+    onAudioPlay?.();
+
     try {
       const seekResult = player.seekTo(0);
       if (seekResult?.then) {
@@ -100,7 +103,6 @@ const styles = StyleSheet.create({
   },
   audioButtonPressed: {
     opacity: 0.65,
-    transform: [{ scale: 0.96 }],
   },
   soundIcon: {
     fontSize: 22,

@@ -18,12 +18,22 @@
   },
   "scripts": {
     "audio:dry-run": "node scripts/generate-audio.js --dry-run",
+    "audio:dry-run:interactive": "node scripts/generate-audio.js --dry-run --include-interactions",
     "audio:generate": "node scripts/generate-audio.js",
+    "audio:generate:interactive": "node scripts/generate-audio.js --include-interactions",
+    "voices:audit": "node scripts/audit-voices.js",
     "content:build": "node scripts/build-content.js",
+    "content:firestore-seed": "node scripts/build-firestore-content-seed.js",
+    "content:upload-firestore": "node scripts/upload-firestore-content.js",
+    "images:registry": "node scripts/build-image-registry.js",
+    "images:audit": "node scripts/audit-images.js",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "firebase-admin": "^14.1.0"
+  }
 }

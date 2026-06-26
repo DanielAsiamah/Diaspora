@@ -1,4 +1,5 @@
 export const COLLECTIONS = {
+  LANGUAGES: 'languages',
   USERS: 'users',
 };
 

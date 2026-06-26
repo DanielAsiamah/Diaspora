@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -10,61 +9,57 @@ import {
   View,
 } from 'react-native';
 
+import AnimatedAtmosphere from '../components/AnimatedAtmosphere';
 import MascotHero from '../components/MascotHero';
 import PrimaryButton from '../components/PrimaryButton';
 import SpeechBubble from '../components/SpeechBubble';
 import { colors, fonts, radius, spacing } from '../theme';
 
 const GREETINGS = [
-  'Wah gwaan! 👋',
-  'Hujambo! 👋',
-  'Sak pase! 👋',
-  'What\'s good! 👋',
-  'Weh di go ahn! 👋',
-  'Nangaadef! 👋',
+  'Wah gwaan!',
+  'Hujambo!',
+  'Sak pase!',
+  'Nangaadef!',
 ];
 
 const REGIONS = [
   {
     id: 'africa',
-    title: 'Africa 🌍',
-    caption: 'Motherland tongues: Swahili, Igbo, Wolof...',
+    title: 'Africa',
+    caption: 'Swahili · Igbo · Wolof',
     color: colors.africaGold,
   },
   {
     id: 'caribbean',
-    title: 'Caribbean 🏝️',
-    caption: 'Vibrant creoles: Jamaican Patois, Haitian Creole...',
+    title: 'Caribbean',
+    caption: 'Patois · Haitian Creole',
     color: colors.caribbeanGreen,
   },
   {
     id: 'central-america',
-    title: 'Central America 🌎',
-    caption: 'Kriol roots: Belizean Creole & coastal dialects...',
+    title: 'Central America',
+    caption: 'Belizean Kriol',
     color: colors.coral,
   },
   {
-    id: 'america',
-    title: 'America 🇺🇸',
-    caption: 'Black American English & cultural vernaculars...',
+    id: 'urban',
+    title: 'Urban dialects',
+    caption: 'AAVE & culture',
     color: colors.blue,
   },
 ];
 
 export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(24)).current;
-  
-  // Greetings cycling state
+  const slideAnim = useRef(new Animated.Value(22)).current;
   const [greetingIndex, setGreetingIndex] = useState(0);
   const bubbleFade = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Initial entrance anim
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 650,
         useNativeDriver: true,
       }),
       Animated.spring(slideAnim, {
@@ -75,30 +70,29 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
       }),
     ]).start();
 
-    // Greetings transition timer
     const interval = setInterval(() => {
       Animated.timing(bubbleFade, {
         toValue: 0,
-        duration: 250,
+        duration: 220,
         useNativeDriver: true,
       }).start(() => {
         setGreetingIndex((prev) => (prev + 1) % GREETINGS.length);
         Animated.timing(bubbleFade, {
           toValue: 1,
-          duration: 350,
+          duration: 320,
           useNativeDriver: true,
         }).start();
       });
-    }, 2800);
+    }, 2600);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [bubbleFade, fadeAnim, slideAnim]);
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.skyTop, colors.skyBottom]}
-        style={StyleSheet.absoluteFill}
+      <AnimatedAtmosphere
+        colors={[colors.splashGreen, colors.skyTop, colors.skyBottom]}
+        accent={colors.caribbeanGreen}
       />
 
       <SafeAreaView style={styles.safeArea}>
@@ -112,38 +106,34 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
               transform: [{ translateY: slideAnim }],
             }}
           >
-            {/* Logo Row */}
             <View style={styles.brandRow}>
               <View style={styles.logoBadge}>
-                <Text style={styles.logoEmoji}>🌎</Text>
+                <Text style={styles.logoText}>D</Text>
               </View>
               <Text style={styles.brandName}>Diaspora</Text>
             </View>
 
-            {/* Mascot */}
             <MascotHero />
 
-            {/* Dynamic Welcome & Intro */}
             <View style={styles.heroCopy}>
               <Animated.View style={{ opacity: bubbleFade }}>
                 <SpeechBubble text={GREETINGS[greetingIndex]} />
               </Animated.View>
               <Text style={styles.title}>Learn the languages{'\n'}of the diaspora</Text>
               <Text style={styles.subtitle}>
-                Fun, bite-sized interactive lessons covering mother tongues, regional creoles, and urban dialects.
+                Fun, bite-sized lessons for mother tongues, creoles, and dialects that carry culture.
               </Text>
             </View>
 
-            {/* Support Regions Grid */}
             <View style={styles.regionsSection}>
-              <Text style={styles.sectionHeader}>SUPPORTED DIALECTS & LANGUAGES</Text>
+              <Text style={styles.sectionHeader}>START YOUR PATH</Text>
               <View style={styles.regionsGrid}>
                 {REGIONS.map((region) => (
                   <View
                     key={region.id}
-                    style={[styles.regionCard, { borderLeftColor: region.color }]}
+                    style={[styles.regionCard, { borderColor: region.color + '66' }]}
                   >
-                    <Text style={styles.regionTitle}>{region.title}</Text>
+                    <Text style={[styles.regionTitle, { color: region.color }]}>{region.title}</Text>
                     <Text style={styles.regionCaption}>{region.caption}</Text>
                   </View>
                 ))}
@@ -152,13 +142,12 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           </Animated.View>
         </ScrollView>
 
-        {/* Action Buttons */}
         <View style={styles.footer}>
-          <PrimaryButton label="Get Started" onPress={onGetStarted} />
+          <PrimaryButton label="GET STARTED" onPress={onGetStarted} />
           <Pressable onPress={onSignIn} style={styles.signInButton}>
             <Text style={styles.signInText}>I already have an account</Text>
           </Pressable>
-          <Text style={styles.footerNote}>Free to start · No Apple fee yet</Text>
+          <Text style={styles.footerNote}>Free to start · learn in bite-sized lessons</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -167,8 +156,8 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
 
 const styles = StyleSheet.create({
   root: {
-    flex: 1,
     backgroundColor: colors.skyBottom,
+    flex: 1,
   },
   safeArea: {
     flex: 1,
@@ -186,16 +175,16 @@ const styles = StyleSheet.create({
   },
   logoBadge: {
     alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-    borderWidth: 2,
+    backgroundColor: colors.accent,
+    borderRadius: radius.pill,
     height: 42,
     justifyContent: 'center',
     width: 42,
   },
-  logoEmoji: {
-    fontSize: 20,
+  logoText: {
+    color: colors.splash,
+    fontFamily: fonts.black,
+    fontSize: 18,
   },
   brandName: {
     color: colors.textDark,
@@ -209,8 +198,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.textDark,
     fontFamily: fonts.black,
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 30,
+    lineHeight: 36,
     marginTop: spacing.sm,
     textAlign: 'center',
   },
@@ -223,7 +212,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   regionsSection: {
-    marginTop: spacing.xl,
+    marginTop: spacing.lg,
   },
   sectionHeader: {
     color: colors.textLight,
@@ -234,26 +223,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   regionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   regionCard: {
     backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1.5,
-    borderLeftWidth: 5,
     borderRadius: radius.md,
-    padding: spacing.md,
+    borderWidth: 1.5,
+    flexGrow: 1,
+    minWidth: '47%',
+    padding: spacing.sm,
   },
   regionTitle: {
-    color: colors.textDark,
     fontFamily: fonts.black,
-    fontSize: 16,
+    fontSize: 15,
   },
   regionCaption: {
     color: colors.textMuted,
     fontFamily: fonts.medium,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
     marginTop: 4,
   },
   footer: {

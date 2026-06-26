@@ -8,35 +8,56 @@ export default function LessonCutscene({
   languageId,
   cutscene,
   audioSource,
+  narrationSource,
+  characterState,
+  onAudioPlay,
   progress,
   onExit,
   onContinue,
 }) {
   const variant = cutscene?.variant || 'fact';
+  const isTutorCorrection = cutscene?.type === 'wrong_answer_feedback';
 
   return (
     <View style={styles.safeArea}>
-      <View style={styles.topBar}>
-        <Pressable
-          accessibilityLabel="Exit lesson"
-          accessibilityRole="button"
-          hitSlop={12}
-          onPress={onExit}
-          style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
-        >
-          <Text style={styles.closeButtonText}>x</Text>
-        </Pressable>
-        <View style={styles.lessonProgressTrack}>
-          <View style={[styles.lessonProgressFill, { width: `${Math.max(progress * 100, 10)}%` }]} />
+      {!isTutorCorrection ? (
+        <View style={styles.topBar}>
+          <Pressable
+            accessibilityLabel="Exit lesson"
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={onExit}
+            style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
+          >
+            <Text style={styles.closeButtonText}>x</Text>
+          </Pressable>
+          <View style={styles.lessonProgressTrack}>
+            <View style={[styles.lessonProgressFill, { width: `${Math.max(progress * 100, 10)}%` }]} />
+          </View>
         </View>
-      </View>
+      ) : null}
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, isTutorCorrection && styles.correctionContent]}
+        showsVerticalScrollIndicator={false}
+      >
         {variant === 'coach' ? (
-          <View style={styles.coachScene}>
-            <LanguageMascot languageId={languageId} size={1.25} />
+          <View style={[styles.coachScene, isTutorCorrection && styles.correctionScene]}>
+            <LanguageMascot languageId={languageId} size={1.25} state={characterState} />
             <Text style={styles.coachEyebrow}>{cutscene.eyebrow || 'Tutor note'}</Text>
             <Text style={styles.coachTitle}>{cutscene.title}</Text>
+            {narrationSource ? (
+              <View style={styles.narrationButtonWrap}>
+                <LessonAudioButton
+                  compact
+                  source={narrationSource}
+                  label="Play tutor narration"
+                  fallbackText={cutscene.body}
+                  onAudioPlay={onAudioPlay}
+                  autoPlay
+                />
+              </View>
+            ) : null}
             <Text style={styles.coachBody}>{cutscene.body}</Text>
           </View>
         ) : null}
@@ -54,6 +75,7 @@ export default function LessonCutscene({
                   source={audioSource}
                   label={`Play pronunciation for ${cutscene.phrase}`}
                   fallbackText={cutscene.phrase}
+                  onAudioPlay={onAudioPlay}
                   autoPlay
                 />
                 <Text style={styles.boardPronunciation}>{cutscene.pronunciation}</Text>
@@ -61,7 +83,7 @@ export default function LessonCutscene({
               <Text style={styles.boardBody}>{cutscene.body}</Text>
             </View>
             <View style={styles.pointerMascot}>
-              <LanguageMascot languageId={languageId} size={0.78} />
+              <LanguageMascot languageId={languageId} size={0.78} state={characterState} />
             </View>
           </View>
         ) : null}
@@ -72,15 +94,27 @@ export default function LessonCutscene({
               <Text style={styles.factIconText}>?</Text>
             </View>
             <Text style={styles.factTitle}>{cutscene.title || 'Did you know?'}</Text>
+            {narrationSource ? (
+              <View style={styles.narrationButtonWrap}>
+                <LessonAudioButton
+                  compact
+                  source={narrationSource}
+                  label="Play tutor narration"
+                  fallbackText={cutscene.body}
+                  onAudioPlay={onAudioPlay}
+                  autoPlay
+                />
+              </View>
+            ) : null}
             <Text style={styles.factBody}>{cutscene.body}</Text>
             <View style={styles.factMascot}>
-              <LanguageMascot languageId={languageId} size={0.72} />
+              <LanguageMascot languageId={languageId} size={0.72} state={characterState} />
             </View>
           </View>
         ) : null}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, isTutorCorrection && styles.correctionFooter]}>
         <Pressable onPress={onContinue} style={({ pressed }) => [styles.continueButton, pressed && styles.continuePressed]}>
           <Text style={styles.continueText}>NEXT</Text>
         </Pressable>
@@ -141,6 +175,15 @@ const styles = StyleSheet.create({
   coachScene: {
     alignItems: 'center',
   },
+  correctionContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingBottom: 130,
+  },
+  correctionScene: {
+    minHeight: 420,
+    justifyContent: 'center',
+  },
   coachEyebrow: {
     color: colors.accent,
     fontFamily: fonts.black,
@@ -164,6 +207,10 @@ const styles = StyleSheet.create({
     lineHeight: 31,
     marginTop: spacing.md,
     textAlign: 'center',
+  },
+  narrationButtonWrap: {
+    alignItems: 'center',
+    marginTop: spacing.md,
   },
   boardScene: {
     minHeight: 500,
@@ -287,6 +334,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     position: 'absolute',
     right: 0,
+  },
+  correctionFooter: {
+    alignItems: 'flex-end',
   },
   continueButton: {
     alignItems: 'center',

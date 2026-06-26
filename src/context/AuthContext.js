@@ -7,12 +7,14 @@ import {
   subscribeToAuthState,
 } from '../services/auth/authService';
 import {
+  addAnswerToLessonSession,
+  completeLessonSession,
   createLessonSession,
   createUserDocument,
-  ensureLanguageProgress,
   getLanguageProgress,
   getUserDocument,
-  updateLanguageProgress,
+  setLanguageProgress,
+  touchUserLastActive,
   updateUserProgress,
 } from '../services/firestore/userService';
 
@@ -27,18 +29,15 @@ export function AuthProvider({ children }) {
     const unsubscribe = subscribeToAuthState(async (firebaseUser) => {
       setUser(firebaseUser);
 
-      try {
-        if (firebaseUser) {
-          const document = await getUserDocument(firebaseUser.uid);
-          setProfile(document);
-        } else {
-          setProfile(null);
-        }
-      } catch {
+      if (firebaseUser) {
+        const document = await getUserDocument(firebaseUser.uid);
+        await touchUserLastActive(firebaseUser.uid).catch(() => {});
+        setProfile(document);
+      } else {
         setProfile(null);
-      } finally {
-        setInitializing(false);
       }
+
+      setInitializing(false);
     });
 
     return unsubscribe;
@@ -68,7 +67,7 @@ export function AuthProvider({ children }) {
     const document = await getUserDocument(firebaseUser.uid);
     setUser(firebaseUser);
     setProfile(document);
-    return { firebaseUser, profile: document };
+    return firebaseUser;
   }, []);
 
   const signIn = useCallback(async ({ email, password }) => {
@@ -77,7 +76,7 @@ export function AuthProvider({ children }) {
     const document = await getUserDocument(firebaseUser.uid);
     setUser(firebaseUser);
     setProfile(document);
-    return { firebaseUser, profile: document };
+    return firebaseUser;
   }, []);
 
   const signOut = useCallback(async () => {
@@ -104,17 +103,6 @@ export function AuthProvider({ children }) {
         return null;
       }
 
-      return ensureLanguageProgress(user.uid, languageId);
-    },
-    [user]
-  );
-
-  const refreshLanguageProgress = useCallback(
-    async (languageId) => {
-      if (!user || !languageId) {
-        return null;
-      }
-
       return getLanguageProgress(user.uid, languageId);
     },
     [user]
@@ -126,18 +114,40 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      await updateLanguageProgress(user.uid, languageId, fields);
+      await setLanguageProgress(user.uid, languageId, fields);
     },
     [user]
   );
 
   const recordLessonSession = useCallback(
-    async (session) => {
-      if (!user || !session?.languageId || !session?.lessonId) {
+    async (fields) => {
+      if (!user) {
         return null;
       }
 
-      return createLessonSession(user.uid, session);
+      return createLessonSession(user.uid, fields);
+    },
+    [user]
+  );
+
+  const recordLessonAnswer = useCallback(
+    async (sessionId, answer) => {
+      if (!user || !sessionId) {
+        return;
+      }
+
+      await addAnswerToLessonSession(user.uid, sessionId, answer);
+    },
+    [user]
+  );
+
+  const finishLessonSession = useCallback(
+    async (sessionId, fields) => {
+      if (!user || !sessionId) {
+        return;
+      }
+
+      await completeLessonSession(user.uid, sessionId, fields);
     },
     [user]
   );
@@ -154,9 +164,10 @@ export function AuthProvider({ children }) {
       refreshProfile,
       syncProgress,
       loadLanguageProgress,
-      refreshLanguageProgress,
       syncLanguageProgress,
       recordLessonSession,
+      recordLessonAnswer,
+      finishLessonSession,
     }),
     [
       user,
@@ -168,9 +179,10 @@ export function AuthProvider({ children }) {
       refreshProfile,
       syncProgress,
       loadLanguageProgress,
-      refreshLanguageProgress,
       syncLanguageProgress,
       recordLessonSession,
+      recordLessonAnswer,
+      finishLessonSession,
     ]
   );
 

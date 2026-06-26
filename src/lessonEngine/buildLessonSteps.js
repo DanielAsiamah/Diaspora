@@ -1,4 +1,5 @@
 import { LESSON_STEP_TYPES } from './lessonStepTypes';
+import { hasVocabImageSource } from '../data/generatedImageRegistry';
 
 const shuffle = (items) => [...items].sort(() => Math.random() - 0.5);
 
@@ -38,6 +39,75 @@ function wordBank(answer, alternatives) {
 function getSourcePool(lesson, phrasePool = []) {
   const usablePool = phrasePool.filter((item) => item.type !== 'chest' && item.phrase && item.meaning);
   return usablePool.length ? usablePool : [lesson].filter(Boolean);
+}
+
+function createImageChoiceStep(target, sourcePool = []) {
+  if (!target?.imageKey || !hasVocabImageSource(target.imageKey, target.category)) {
+    return null;
+  }
+
+  const candidates = sourcePool
+    .filter((item) => item?.meaning && item?.imageKey && hasVocabImageSource(item.imageKey, item.category));
+  const sameCategory = candidates.filter((item) => item.category === target.category);
+  const choicePool = sameCategory.length >= 4 ? sameCategory : candidates;
+  const otherChoices = choicePool.filter((item) => item.id !== target.id);
+
+  if (otherChoices.length < 3) {
+    return null;
+  }
+
+  const choices = shuffle([target, ...shuffle(otherChoices).slice(0, 3)])
+    .map((item) => ({
+      value: item.meaning,
+      imageKey: item.imageKey,
+      category: item.category,
+    }));
+
+  return {
+    id: 'image-choice',
+    type: LESSON_STEP_TYPES.IMAGE_CHOICE,
+    title: 'Select the correct image',
+    prompt: target.phrase,
+    answer: target.meaning,
+    imageChoices: choices,
+    audioKey: target.audioKey,
+    note: target.note,
+  };
+}
+
+function createFirstAvailableImageChoiceStep(sourcePool = [], startIndex = 0) {
+  for (let offset = 0; offset < sourcePool.length; offset += 1) {
+    const item = sourcePool[(startIndex + offset) % sourcePool.length];
+    const step = createImageChoiceStep(item, sourcePool);
+    if (step) return step;
+  }
+
+  return null;
+}
+
+function createMatchPairsStep(sourcePool = [], startIndex = 0) {
+  const pairs = [0, 1, 2, 3]
+    .map((offset) => sourcePool[(startIndex + offset) % sourcePool.length])
+    .filter((item) => item?.phrase && item?.meaning)
+    .map((item) => ({
+      id: item.id,
+      left: item.phrase,
+      right: item.meaning,
+      audioKey: item.audioKey,
+    }));
+
+  if (pairs.length < 3) return null;
+
+  return {
+    id: 'match-pairs',
+    type: LESSON_STEP_TYPES.MATCH_PAIRS,
+    title: 'Match each phrase',
+    prompt: 'Tap a phrase, then its meaning',
+    answer: '__matched__',
+    pairs,
+    leftItems: shuffle(pairs.map((pair) => ({ id: pair.id, value: pair.left, pairId: pair.id, audioKey: pair.audioKey }))),
+    rightItems: shuffle(pairs.map((pair) => ({ id: `${pair.id}-meaning`, value: pair.right, pairId: pair.id }))),
+  };
 }
 
 export function createTeachingItems(lesson, phrasePool = []) {
@@ -181,13 +251,82 @@ export function createLessonSteps(lesson, phrasePool = [], languageId = 'patois'
   const teachingItems = createTeachingItems(lesson, phrasePool);
   const sourcePool = getSourcePool(lesson, phrasePool);
   const startIndex = Math.max(0, sourcePool.findIndex((item) => item.id === lesson.id));
-  const pick = (offset) => sourcePool[(startIndex + offset) % sourcePool.length];
+  const pick = (offset) => sourcePool[(startIndex + offset) % sourcePool.length] || lesson;
   const meanings = sourcePool.map((item) => item.meaning);
   const phrases = sourcePool.map((item) => item.phrase);
   const first = pick(0);
   const second = pick(1);
   const third = pick(2);
   const fourth = pick(3);
+  const imageChoiceStep = createFirstAvailableImageChoiceStep(sourcePool, startIndex);
+  const matchPairsStep = createMatchPairsStep(sourcePool, startIndex);
+  const practiceCandidates = [
+    {
+      id: 'meaning-choice',
+      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
+      title: 'Choose the correct meaning',
+      prompt: first.phrase,
+      answer: first.meaning,
+      choices: choiceSet(first.meaning, meanings.filter((value) => value !== first.meaning)),
+      audioKey: first.audioKey,
+      note: first.note,
+    },
+    imageChoiceStep,
+    matchPairsStep,
+    {
+      id: 'reverse-choice',
+      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
+      title: `How do you say "${second.meaning}"?`,
+      prompt: second.meaning,
+      answer: second.phrase,
+      choices: choiceSet(second.phrase, phrases.filter((value) => value !== second.phrase)),
+      note: second.note,
+    },
+    third?.audioKey ? {
+      id: 'listen-choice',
+      type: LESSON_STEP_TYPES.AUDIO_LISTEN,
+      title: 'Listen and choose the meaning',
+      prompt: 'Tap the speaker to hear the phrase',
+      answer: third.meaning,
+      choices: choiceSet(third.meaning, meanings.filter((value) => value !== third.meaning)),
+      audioKey: third.audioKey,
+      audioLabel: 'Play the phrase',
+      note: third.note,
+    } : null,
+    {
+      id: 'build-meaning',
+      type: LESSON_STEP_TYPES.BUILD_SENTENCE,
+      title: 'Build the English meaning',
+      prompt: fourth.phrase,
+      answer: fourth.meaning,
+      wordBank: wordBank(fourth.meaning, meanings),
+      audioKey: fourth.audioKey,
+      note: fourth.note,
+    },
+    {
+      id: 'build-phrase',
+      type: LESSON_STEP_TYPES.BUILD_SENTENCE,
+      title: `Build the ${languageId === 'patois' ? 'Patois' : 'language'} phrase`,
+      prompt: first.meaning,
+      answer: first.phrase,
+      wordBank: wordBank(first.phrase, phrases),
+      note: first.note,
+    },
+    {
+      id: 'final-challenge',
+      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
+      title: 'Final challenge',
+      prompt: second.phrase,
+      answer: second.meaning,
+      choices: choiceSet(second.meaning, meanings.filter((value) => value !== second.meaning)),
+      audioKey: second.audioKey,
+      note: second.note,
+    },
+  ].filter(Boolean);
+
+  const firstPractice = practiceCandidates[0];
+  const flexiblePractice = shuffle(practiceCandidates.slice(1));
+  const practiceSteps = [firstPractice, ...flexiblePractice].slice(0, Math.min(7, practiceCandidates.length));
 
   return [
     {
@@ -205,65 +344,7 @@ export function createLessonSteps(lesson, phrasePool = [], languageId = 'patois'
       audioKey: item.audioKey,
       sourceItem: item,
     })),
-    {
-      id: 'meaning-choice',
-      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
-      title: 'Choose the correct meaning',
-      prompt: first.phrase,
-      answer: first.meaning,
-      choices: choiceSet(first.meaning, meanings.filter((value) => value !== first.meaning)),
-      audioKey: first.audioKey,
-      note: first.note,
-    },
-    {
-      id: 'reverse-choice',
-      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
-      title: `How do you say "${second.meaning}"?`,
-      prompt: second.meaning,
-      answer: second.phrase,
-      choices: choiceSet(second.phrase, phrases.filter((value) => value !== second.phrase)),
-      note: second.note,
-    },
-    {
-      id: 'listen-choice',
-      type: LESSON_STEP_TYPES.AUDIO_LISTEN,
-      title: 'Listen and choose the meaning',
-      prompt: 'Tap the speaker to hear the phrase',
-      answer: third.meaning,
-      choices: choiceSet(third.meaning, meanings.filter((value) => value !== third.meaning)),
-      audioKey: third.audioKey,
-      audioLabel: 'Play the phrase',
-      note: third.note,
-    },
-    {
-      id: 'build-meaning',
-      type: LESSON_STEP_TYPES.BUILD_SENTENCE,
-      title: 'Build the English meaning',
-      prompt: fourth.phrase,
-      answer: fourth.meaning,
-      wordBank: wordBank(fourth.meaning, meanings),
-      audioKey: fourth.audioKey,
-      note: fourth.note,
-    },
-    {
-      id: 'build-phrase',
-      type: LESSON_STEP_TYPES.BUILD_SENTENCE,
-      title: 'Build the Patois phrase',
-      prompt: first.meaning,
-      answer: first.phrase,
-      wordBank: wordBank(first.phrase, phrases),
-      note: first.note,
-    },
-    {
-      id: 'final-challenge',
-      type: LESSON_STEP_TYPES.MULTIPLE_CHOICE,
-      title: 'Final challenge',
-      prompt: second.phrase,
-      answer: second.meaning,
-      choices: choiceSet(second.meaning, meanings.filter((value) => value !== second.meaning)),
-      audioKey: second.audioKey,
-      note: second.note,
-    },
+    ...practiceSteps,
     {
       type: LESSON_STEP_TYPES.LESSON_COMPLETE,
       id: 'lesson-complete',

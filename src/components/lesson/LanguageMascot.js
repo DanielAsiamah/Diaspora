@@ -72,10 +72,9 @@ function getLook(languageId) {
 
 export default function LanguageMascot({ languageId = 'patois', size = 1 }) {
   const look = getLook(languageId);
-  const scaleStyle = { transform: [{ scale: size }] };
 
   return (
-    <View style={[styles.wrapper, scaleStyle]}>
+    <View style={[styles.wrapper, { transform: [{ scale: size }] }]}>
       {look.headWrap ? (
         <View style={[styles.headWrap, { backgroundColor: look.headWrap }]} />
       ) : null}

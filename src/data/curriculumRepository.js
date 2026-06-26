@@ -1,14 +1,45 @@
-import { coursesData } from './lessons';
+import { getFirestoreCourse } from '../services/firestore/curriculumService';
+import { coursesData } from './generatedCourses';
 
-// The UI reads curriculum through this boundary rather than importing seed
-// records directly. A Firestore implementation can replace this data source
-// later while preserving the course, unit, lesson, and exercise shapes.
+function sortUnits(units = []) {
+  return units
+    .filter((unit) => unit.status !== 'draft')
+    .map((unit) => ({
+      ...unit,
+      lessons: [...(unit.lessons || [])]
+        .filter((lesson) => lesson.status !== 'draft')
+        .sort((a, b) => (a.order || 0) - (b.order || 0)),
+    }))
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
 export function getCourseById(courseId) {
-  return coursesData[courseId] || coursesData.patois;
+  const course = coursesData[courseId] || coursesData.patois;
+  return {
+    ...course,
+    id: courseId || 'patois',
+    units: sortUnits(course.units),
+  };
 }
 
 export function getPublishedUnits(courseId) {
-  return getCourseById(courseId).units
-    .filter((unit) => unit.status !== 'draft')
-    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  return getCourseById(courseId).units;
+}
+
+export async function loadCourseById(courseId) {
+  const localCourse = getCourseById(courseId);
+
+  try {
+    const firestoreCourse = await getFirestoreCourse(courseId);
+    if (!firestoreCourse?.units?.length) return localCourse;
+
+    return {
+      ...localCourse,
+      ...firestoreCourse,
+      id: courseId || firestoreCourse.id || localCourse.id,
+      units: sortUnits(firestoreCourse.units),
+    };
+  } catch {
+    return localCourse;
+  }
 }

@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -10,6 +9,7 @@ import {
   View,
 } from 'react-native';
 
+import AnimatedAtmosphere from '../components/AnimatedAtmosphere';
 import PrimaryButton from '../components/PrimaryButton';
 import { colors, fonts, radius, spacing } from '../theme';
 
@@ -127,9 +127,9 @@ export default function CourseSelectScreen({ userLanguage, onSelectCourse, onBac
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.skyTop, colors.skyBottom]}
-        style={StyleSheet.absoluteFill}
+      <AnimatedAtmosphere
+        colors={[colors.splashGreen, colors.skyTop, colors.skyBottom]}
+        accent={colors.caribbeanGreen}
       />
 
       <SafeAreaView style={styles.safeArea}>

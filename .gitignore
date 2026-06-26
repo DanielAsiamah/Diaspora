@@ -8,7 +8,6 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
-outputs/
 
 # Native
 .kotlin/
@@ -34,6 +33,8 @@ yarn-error.*
 # local env files
 .env
 .env*.local
+serviceAccountKey.json
+*-service-account.json
 
 # typescript
 *.tsbuildinfo

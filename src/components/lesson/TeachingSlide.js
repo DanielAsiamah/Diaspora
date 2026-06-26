@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { colors, fonts, radius, spacing } from '../../theme';
 import LanguageMascot from './LanguageMascot';
+import LessonAudioButton from './LessonAudioButton';
 import MascotSpeechBubble from './MascotSpeechBubble';
 import VocabularyCard from './VocabularyCard';
 
@@ -18,11 +19,17 @@ export default function TeachingSlide({
   topic,
   items,
   getAudioSource,
+  getNarrationSource,
+  getImageSource,
+  characterState,
+  onAudioPlay,
   progress,
   onExit,
   onContinue,
 }) {
   const lessonTopic = titleCase(topic || 'today');
+  const introText = `Today we are learning ${lessonTopic.toLowerCase()}. Listen first, then you will practice.`;
+  const introAudioSource = getNarrationSource?.(introText);
 
   return (
     <View style={styles.safeArea}>
@@ -43,10 +50,24 @@ export default function TeachingSlide({
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.mascotRow}>
-          <LanguageMascot languageId={languageId} size={0.92} />
-          <MascotSpeechBubble eyebrow="Before we quiz">
-            {`Today we are learning ${lessonTopic.toLowerCase()}. Listen first, then you will practice.`}
-          </MascotSpeechBubble>
+          <LanguageMascot languageId={languageId} size={0.92} state={characterState} />
+          <View style={styles.speechStack}>
+            <MascotSpeechBubble eyebrow="Before we quiz">
+              {introText}
+            </MascotSpeechBubble>
+            {introAudioSource ? (
+              <View style={styles.introAudioWrap}>
+                <LessonAudioButton
+                  compact
+                  source={introAudioSource}
+                  label="Play tutor introduction"
+                  fallbackText={introText}
+                  onAudioPlay={onAudioPlay}
+                  autoPlay
+                />
+              </View>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.explainCard}>
@@ -63,6 +84,8 @@ export default function TeachingSlide({
               item={item}
               index={index}
               audioSource={getAudioSource(item)}
+              imageSource={getImageSource?.(item)}
+              onAudioPlay={onAudioPlay}
             />
           ))}
         </View>
@@ -128,6 +151,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.md,
+  },
+  speechStack: {
+    flex: 1,
+  },
+  introAudioWrap: {
+    alignItems: 'flex-start',
+    marginTop: spacing.sm,
   },
   explainCard: {
     backgroundColor: 'rgba(244, 185, 66, 0.1)',
